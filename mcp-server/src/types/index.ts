@@ -1,5 +1,44 @@
 import { z } from "zod";
 
+// ── Card product catalog (for agents: compare products, features, checkout fit) ─
+
+export const CardFeatureCategorySchema = z.enum([
+  "rewards",
+  "travel",
+  "shopping",
+  "protection",
+  "lifestyle",
+  "fee",
+]);
+
+export type CardFeatureCategory = z.infer<typeof CardFeatureCategorySchema>;
+
+export const CardFeatureSchema = z.object({
+  featureId: z.string(),
+  name: z.string(),
+  category: CardFeatureCategorySchema,
+  summary: z.string(),
+  /** Merchant spend categories or free-form tags (e.g. electronics) used to surface relevant benefits. */
+  purchaseRelevanceTags: z.array(z.string()),
+});
+
+export type CardFeature = z.infer<typeof CardFeatureSchema>;
+
+export const CardProductSchema = z.object({
+  productId: z.string(),
+  displayName: z.string(),
+  issuer: z.string(),
+  network: z.enum(["visa", "mastercard", "amex", "discover"]),
+  tier: z.enum(["standard", "gold", "platinum", "infinite"]),
+  annualFeeUsd: z.number().optional(),
+  marketingSummary: z.string(),
+  features: z.array(CardFeatureSchema),
+  /** Categories where this product is typically strongest vs peers. */
+  strongCategories: z.array(z.string()),
+});
+
+export type CardProduct = z.infer<typeof CardProductSchema>;
+
 // ── Card Types ──────────────────────────────────────────────────────────────
 
 export const CardSchema = z.object({
@@ -14,6 +53,12 @@ export const CardSchema = z.object({
   creditLimit: z.number().optional(),
   availableCredit: z.number().optional(),
   rewardsProgram: z.string().optional(),
+  /** Issuer product line in the static catalog (e.g. prod-chase-sapphire-reserve). */
+  productId: z.string().optional(),
+  /** Resolved display name from catalog when productId is set. */
+  productName: z.string().optional(),
+  /** Product-level features, attached from catalog for agent reasoning. */
+  features: z.array(CardFeatureSchema).optional(),
 });
 
 export type Card = z.infer<typeof CardSchema>;

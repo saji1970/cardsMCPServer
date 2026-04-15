@@ -1,5 +1,5 @@
 import axios, { AxiosError } from "axios";
-import { config } from "../config/env";
+import { getEffectiveSimulationMode } from "../config/effective-config";
 import { logger } from "../utils/logger";
 import {
   RewardsBalance,
@@ -7,13 +7,8 @@ import {
   RedemptionRequest,
   RedemptionResponse,
 } from "../types";
+import { getRewardsHttpClient } from "./http-clients";
 import { v4Hex } from "./util";
-
-const client = axios.create({
-  baseURL: config.rewardsApiBaseUrl,
-  timeout: 5000,
-  headers: { Authorization: `Bearer ${config.authToken}` },
-});
 
 // ── Category multipliers for mock calculation ───────────────────────────────
 
@@ -89,11 +84,13 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 500): P
 
 export const rewardsAdapter = {
   async getBalance(cardId: string): Promise<RewardsBalance | null> {
-    if (config.simulationMode) {
+    if (getEffectiveSimulationMode()) {
       return MOCK_BALANCES[cardId] ?? null;
     }
     try {
-      const res = await withRetry(() => client.get<RewardsBalance>(`/balance/${cardId}`));
+      const res = await withRetry(() =>
+        getRewardsHttpClient().get<RewardsBalance>(`/balance/${cardId}`)
+      );
       return res.data;
     } catch {
       return MOCK_BALANCES[cardId] ?? null;
@@ -106,7 +103,7 @@ export const rewardsAdapter = {
     category: string,
     cardTier: string
   ): Promise<RewardsCalculation> {
-    if (config.simulationMode) {
+    if (getEffectiveSimulationMode()) {
       const baseRate = CATEGORY_RATES[category.toLowerCase()] ?? CATEGORY_RATES["default"];
       const bonusRate = TIER_BONUS[cardTier.toLowerCase()] ?? 0;
       const totalRate = baseRate + bonusRate;
@@ -126,7 +123,7 @@ export const rewardsAdapter = {
     }
     try {
       const res = await withRetry(() =>
-        client.post<RewardsCalculation>("/calculate", { cardId, amount, category })
+        getRewardsHttpClient().post<RewardsCalculation>("/calculate", { cardId, amount, category })
       );
       return res.data;
     } catch (err) {
@@ -152,7 +149,7 @@ export const rewardsAdapter = {
   },
 
   async redeemRewards(req: RedemptionRequest): Promise<RedemptionResponse> {
-    if (config.simulationMode) {
+    if (getEffectiveSimulationMode()) {
       const balance = MOCK_BALANCES[req.cardId];
       if (!balance || balance.pointsBalance < req.points) {
         return {
@@ -180,7 +177,7 @@ export const rewardsAdapter = {
     }
     try {
       const res = await withRetry(() =>
-        client.post<RedemptionResponse>("/redeem", req)
+        getRewardsHttpClient().post<RedemptionResponse>("/redeem", req)
       );
       return res.data;
     } catch (err) {

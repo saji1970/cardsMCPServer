@@ -1,14 +1,10 @@
 import axios, { AxiosError } from "axios";
-import { config } from "../config/env";
+import { attachProductToCard } from "../data/card-catalog";
+import { getEffectiveSimulationMode } from "../config/effective-config";
 import { logger } from "../utils/logger";
 import { Card, AuthorizationRequest, AuthorizationResponse } from "../types";
+import { getCardHttpClient } from "./http-clients";
 import { v4Hex } from "./util";
-
-const client = axios.create({
-  baseURL: config.cardApiBaseUrl,
-  timeout: 5000,
-  headers: { Authorization: `Bearer ${config.authToken}` },
-});
 
 // ── Mock data (used in simulation mode or when API is unreachable) ──────────
 
@@ -25,6 +21,7 @@ const MOCK_CARDS: Card[] = [
     creditLimit: 25000,
     availableCredit: 18500,
     rewardsProgram: "Ultimate Rewards",
+    productId: "prod-chase-sapphire-reserve",
   },
   {
     cardId: "card-tok-002",
@@ -38,6 +35,7 @@ const MOCK_CARDS: Card[] = [
     creditLimit: 15000,
     availableCredit: 12300,
     rewardsProgram: "Membership Rewards",
+    productId: "prod-amex-gold",
   },
   {
     cardId: "card-tok-003",
@@ -51,6 +49,7 @@ const MOCK_CARDS: Card[] = [
     creditLimit: 10000,
     availableCredit: 7200,
     rewardsProgram: "ThankYou Points",
+    productId: "prod-citi-double-cash",
   },
   {
     cardId: "card-tok-004",
@@ -64,8 +63,13 @@ const MOCK_CARDS: Card[] = [
     creditLimit: 50000,
     availableCredit: 42000,
     rewardsProgram: "Venture Rewards",
+    productId: "prod-capital-venture-x",
   },
 ];
+
+function enrich(card: Card): Card {
+  return attachProductToCard(card);
+}
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 500): Promise<T> {
   let lastError: unknown;
@@ -85,35 +89,39 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 500): P
 
 export const cardAdapter = {
   async getEligibleCards(userId: string): Promise<Card[]> {
-    if (config.simulationMode) {
+    if (getEffectiveSimulationMode()) {
       logger.info("Simulation mode: returning mock cards", { userId });
-      return MOCK_CARDS.filter((c) => c.status === "active");
+      return MOCK_CARDS.filter((c) => c.status === "active").map(enrich);
     }
     try {
-      const res = await withRetry(() => client.get<Card[]>(`/users/${userId}/eligible`));
-      return res.data;
+      const res = await withRetry(() =>
+        getCardHttpClient().get<Card[]>(`/users/${userId}/eligible`)
+      );
+      return res.data.map(enrich);
     } catch (err) {
       logger.error("Card API unreachable, falling back to mock", {
         error: (err as AxiosError).message,
       });
-      return MOCK_CARDS.filter((c) => c.status === "active");
+      return MOCK_CARDS.filter((c) => c.status === "active").map(enrich);
     }
   },
 
   async getCardById(cardId: string): Promise<Card | null> {
-    if (config.simulationMode) {
-      return MOCK_CARDS.find((c) => c.cardId === cardId) ?? null;
+    if (getEffectiveSimulationMode()) {
+      const c = MOCK_CARDS.find((x) => x.cardId === cardId);
+      return c ? enrich(c) : null;
     }
     try {
-      const res = await withRetry(() => client.get<Card>(`/${cardId}`));
-      return res.data;
+      const res = await withRetry(() => getCardHttpClient().get<Card>(`/${cardId}`));
+      return enrich(res.data);
     } catch {
-      return MOCK_CARDS.find((c) => c.cardId === cardId) ?? null;
+      const c = MOCK_CARDS.find((x) => x.cardId === cardId);
+      return c ? enrich(c) : null;
     }
   },
 
   async authorizePayment(req: AuthorizationRequest): Promise<AuthorizationResponse> {
-    if (config.simulationMode) {
+    if (getEffectiveSimulationMode()) {
       logger.info("Simulation mode: mock authorization", { cardId: req.cardId, amount: req.amount });
       const card = MOCK_CARDS.find((c) => c.cardId === req.cardId);
       const approved = card
@@ -132,7 +140,7 @@ export const cardAdapter = {
     }
     try {
       const res = await withRetry(() =>
-        client.post<AuthorizationResponse>("/authorize", req)
+        getCardHttpClient().post<AuthorizationResponse>("/authorize", req)
       );
       return res.data;
     } catch (err) {

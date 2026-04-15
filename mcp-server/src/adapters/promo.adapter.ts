@@ -1,13 +1,8 @@
 import axios, { AxiosError } from "axios";
-import { config } from "../config/env";
+import { getEffectiveSimulationMode } from "../config/effective-config";
 import { logger } from "../utils/logger";
 import { Promotion } from "../types";
-
-const client = axios.create({
-  baseURL: config.promoApiBaseUrl,
-  timeout: 5000,
-  headers: { Authorization: `Bearer ${config.authToken}` },
-});
+import { getPromoHttpClient } from "./http-clients";
 
 // ── Mock promotions ─────────────────────────────────────────────────────────
 
@@ -72,6 +67,21 @@ const MOCK_PROMOTIONS: Promotion[] = [
     applicableCards: ["card-tok-001", "card-tok-002", "card-tok-003", "card-tok-004"],
     stackable: true,
   },
+  {
+    promoId: "PROMO-005",
+    title: "Electronics 3% back",
+    description: "3% statement-style credit on electronics category spend over $75",
+    discountType: "cashback",
+    discountValue: 3,
+    minSpend: 75,
+    maxDiscount: 100,
+    validFrom: "2026-01-01",
+    validTo: "2026-12-31",
+    applicableCategories: ["electronics"],
+    applicableMerchants: [],
+    applicableCards: ["card-tok-001", "card-tok-004"],
+    stackable: true,
+  },
 ];
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 500): Promise<T> {
@@ -101,7 +111,7 @@ export const promoAdapter = {
     merchant: string,
     amount: number
   ): Promise<Promotion[]> {
-    if (config.simulationMode) {
+    if (getEffectiveSimulationMode()) {
       logger.info("Simulation mode: returning mock promotions", { category, merchant });
       return MOCK_PROMOTIONS.filter((p) => {
         if (!isPromotionActive(p)) return false;
@@ -116,7 +126,7 @@ export const promoAdapter = {
     }
     try {
       const res = await withRetry(() =>
-        client.post<Promotion[]>("/applicable", { cardIds, category, merchant, amount })
+        getPromoHttpClient().post<Promotion[]>("/applicable", { cardIds, category, merchant, amount })
       );
       return res.data;
     } catch (err) {
@@ -137,11 +147,11 @@ export const promoAdapter = {
   },
 
   async getActivePromotions(): Promise<Promotion[]> {
-    if (config.simulationMode) {
+    if (getEffectiveSimulationMode()) {
       return MOCK_PROMOTIONS.filter(isPromotionActive);
     }
     try {
-      const res = await withRetry(() => client.get<Promotion[]>("/active"));
+      const res = await withRetry(() => getPromoHttpClient().get<Promotion[]>("/active"));
       return res.data;
     } catch {
       return MOCK_PROMOTIONS.filter(isPromotionActive);

@@ -1,3 +1,4 @@
+import { listCardProducts } from "../data/card-catalog";
 import { cardService } from "../services/card.service";
 import { rewardsService } from "../services/rewards.service";
 import { promoService } from "../services/promo.service";
@@ -20,6 +21,13 @@ export const resourceDefinitions = [
     uri: "promotions://active",
     name: "Active Promotions",
     description: "All currently active promotions and offers",
+    mimeType: "application/json",
+  },
+  {
+    uri: "cards://products",
+    name: "Card product catalog",
+    description:
+      "Issuer card products with marketing summaries, feature lists, and strong spend categories for comparing payment options",
     mimeType: "application/json",
   },
 ];
@@ -94,6 +102,20 @@ export async function handleResourceRead(uri: string): Promise<ResourceResult> {
             uri,
             mimeType: "application/json",
             text: JSON.stringify(promos, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "cards://products": {
+      logger.info("Resource: cards://products");
+      const products = listCardProducts();
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(products, null, 2),
           },
         ],
       };

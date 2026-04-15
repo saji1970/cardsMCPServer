@@ -3,11 +3,13 @@ import { cardService } from "../services/card.service";
 import { rewardsService } from "../services/rewards.service";
 import { promoService } from "../services/promo.service";
 import { decisionEngine } from "../services/decision.engine";
+import { featuresRelevantToPurchase, purchaseService } from "../services/purchase.service";
 import { logger } from "../utils/logger";
+import { getDynamicToolBundle } from "./dynamic-tools-state";
 
 // ── JSON Schema definitions for MCP tool listing ────────────────────────────
 
-export const toolDefinitions = [
+export const staticToolDefinitions = [
   {
     name: "get_eligible_cards",
     description:
@@ -134,7 +136,79 @@ export const toolDefinitions = [
       required: ["userId", "amount", "merchant", "category"],
     },
   },
+  {
+    name: "list_card_products",
+    description:
+      "List issuer card products in the catalog with marketing positioning, feature lists, and strong spend categories. Use this to compare products, explain benefits, or ground checkout advice before choosing a card.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        issuer: {
+          type: "string",
+          description: "Optional filter: issuer name substring (e.g. Chase, Citi)",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_card_product_features",
+    description:
+      "Return full product details and features for a catalog productId, or resolve features via a user's cardId. Use for deep benefit and offer-adjacent reasoning (protections, category strengths).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: {
+          type: "string",
+          description: "Catalog product id (e.g. prod-chase-sapphire-reserve)",
+        },
+        cardId: {
+          type: "string",
+          description: "Tokenized wallet card id — resolves linked product when productId is omitted",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "evaluate_purchase_payment_options",
+    description:
+      "Primary agent tool for checkout: ranks eligible payment cards for a specific purchase (amount, merchant, category), merges active offers, rewards, and product features, and returns checkout-ready suggestions plus an agentSummary for user-facing guidance.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        userId: { type: "string", description: "The user identifier" },
+        amount: { type: "number", description: "Purchase amount (positive)" },
+        merchant: { type: "string", description: "Merchant or storefront name" },
+        category: {
+          type: "string",
+          description:
+            "Spend category for this basket (e.g. dining, travel, groceries, shopping, electronics)",
+        },
+        currency: { type: "string", description: "Currency code (default: USD)" },
+        purchaseNotes: {
+          type: "string",
+          description:
+            "Optional free text: items, SKUs, or channels (e.g. laptop, preorder, subscription) to surface relevant protections or tags",
+        },
+      },
+      required: ["userId", "amount", "merchant", "category"],
+    },
+  },
+  {
+    name: "list_openapi_loaded_operations",
+    description:
+      "List all HTTP operations that were registered as MCP tools from OpenAPI specs (OPENAPI_SPEC_PATHS at server startup). Use to discover ext_* tool names, methods, paths, and base URLs before calling them.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
 ];
+
+/** Built-in tools only; server merges OpenAPI-generated tools at runtime. */
+export const toolDefinitions = staticToolDefinitions;
 
 // ── Zod schemas for runtime validation ──────────────────────────────────────
 
@@ -185,6 +259,24 @@ const SimulateTransactionInput = z.object({
   currency: z.string().optional().default("USD"),
 });
 
+const ListCardProductsInput = z.object({
+  issuer: z.string().optional(),
+});
+
+const GetCardProductFeaturesInput = z.object({
+  productId: z.string().optional(),
+  cardId: z.string().optional(),
+});
+
+const EvaluatePurchasePaymentInput = z.object({
+  userId: z.string(),
+  amount: z.number().positive(),
+  merchant: z.string(),
+  category: z.string(),
+  currency: z.string().optional().default("USD"),
+  purchaseNotes: z.string().optional(),
+});
+
 // ── Tool handler dispatch ───────────────────────────────────────────────────
 
 type ToolResult = {
@@ -208,6 +300,11 @@ export async function handleToolCall(
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   try {
+    const dynamicBundle = getDynamicToolBundle();
+    if (dynamicBundle?.hasTool(name)) {
+      return await dynamicBundle.invoke(name, args);
+    }
+
     switch (name) {
       // ── Card tools ──────────────────────────────────────────────────────
       case "get_eligible_cards": {
@@ -226,6 +323,9 @@ export async function handleToolCall(
             tier: c.tier,
             availableCredit: c.availableCredit,
             rewardsProgram: c.rewardsProgram,
+            productId: c.productId,
+            productName: c.productName,
+            features: c.features ?? [],
           })),
         });
       }
@@ -273,6 +373,10 @@ export async function handleToolCall(
       case "recommend_payment_strategy": {
         const params = RecommendStrategyInput.parse(args);
         const strategy = await decisionEngine.recommendPaymentStrategy(params);
+        const featBest = featuresRelevantToPurchase(
+          strategy.bestCard.card.features,
+          params.category
+        );
         return ok({
           success: true,
           summary: strategy.summary,
@@ -283,10 +387,13 @@ export async function handleToolCall(
             network: strategy.bestCard.card.network,
             issuer: strategy.bestCard.card.issuer,
             tier: strategy.bestCard.card.tier,
+            productId: strategy.bestCard.card.productId,
+            productName: strategy.bestCard.card.productName,
             rewardValue: strategy.bestCard.rewardValue,
             discountValue: strategy.bestCard.discountValue,
             effectiveValue: strategy.bestCard.effectiveValue,
             rewards: strategy.bestCard.rewards,
+            relevantFeatures: featBest,
             promotions: strategy.bestCard.applicablePromotions.map((p) => ({
               promoId: p.promoId,
               title: p.title,
@@ -299,9 +406,12 @@ export async function handleToolCall(
             cardId: alt.card.cardId,
             last4: alt.card.last4,
             issuer: alt.card.issuer,
+            productId: alt.card.productId,
+            productName: alt.card.productName,
             effectiveValue: alt.effectiveValue,
             rewardValue: alt.rewardValue,
             discountValue: alt.discountValue,
+            relevantFeatures: featuresRelevantToPurchase(alt.card.features, params.category),
           })),
         });
       }
@@ -331,6 +441,61 @@ export async function handleToolCall(
               discountValue: p.discountValue,
             })),
           },
+        });
+      }
+
+      case "list_card_products": {
+        const { issuer } = ListCardProductsInput.parse(args);
+        const products = purchaseService.listProducts(issuer ? { issuer } : undefined);
+        return ok({
+          success: true,
+          count: products.length,
+          products: products.map((p) => ({
+            productId: p.productId,
+            displayName: p.displayName,
+            issuer: p.issuer,
+            network: p.network,
+            tier: p.tier,
+            annualFeeUsd: p.annualFeeUsd,
+            marketingSummary: p.marketingSummary,
+            strongCategories: p.strongCategories,
+            features: p.features,
+          })),
+        });
+      }
+
+      case "get_card_product_features": {
+        const { productId, cardId } = GetCardProductFeaturesInput.parse(args);
+        if (!productId && !cardId) {
+          return fail("Provide productId or cardId to load product features");
+        }
+        let resolvedProductId = productId;
+        if (cardId && !resolvedProductId) {
+          const card = await cardService.getCardById(cardId);
+          if (!card) return fail(`Card ${cardId} not found`);
+          resolvedProductId = card.productId;
+          if (!resolvedProductId) {
+            return fail(`Card ${cardId} has no linked catalog productId`);
+          }
+        }
+        const detail = purchaseService.getProductDetail(resolvedProductId!);
+        if (!detail) return fail(`Unknown productId: ${resolvedProductId}`);
+        return ok({ success: true, product: detail });
+      }
+
+      case "evaluate_purchase_payment_options": {
+        const params = EvaluatePurchasePaymentInput.parse(args);
+        const evaluation = await purchaseService.evaluatePurchasePayment(params);
+        return ok({ success: true, ...evaluation });
+      }
+
+      case "list_openapi_loaded_operations": {
+        const b = getDynamicToolBundle();
+        return ok({
+          success: true,
+          count: b?.operationSummaries.length ?? 0,
+          operations: b?.operationSummaries ?? [],
+          hint: "OpenAPI-backed tools are named ext_<specFile>_<operationId>. Set OPENAPI_SPEC_PATHS (semicolon- or comma-separated) before starting the server to load specs.",
         });
       }
 

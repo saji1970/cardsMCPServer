@@ -7,15 +7,27 @@ import {
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config/env";
+import { bootstrapOpenApiTools } from "./openapi/bootstrap";
 import { logger } from "./utils/logger";
-import { toolDefinitions, handleToolCall } from "./tools/registry";
+import { staticToolDefinitions, handleToolCall } from "./tools/registry";
+import { getDynamicToolBundle } from "./tools/dynamic-tools-state";
 import { resourceDefinitions, handleResourceRead } from "./resources/resources";
 
 async function main(): Promise<void> {
   logger.info("Initializing Cards MCP Server", {
     port: config.port,
     simulationMode: config.simulationMode,
+    openApiSpecPathCount: config.openApiSpecPaths.length,
   });
+
+  try {
+    await bootstrapOpenApiTools();
+  } catch (err) {
+    logger.error("OpenAPI bootstrap failed", { error: (err as Error).message });
+  }
+  const dyn = getDynamicToolBundle();
+  const openApiTools = dyn?.tools ?? [];
+  const allToolDefinitions = [...staticToolDefinitions, ...openApiTools];
 
   const server = new Server(
     {
@@ -32,7 +44,7 @@ async function main(): Promise<void> {
 
   // ── List tools ────────────────────────────────────────────────────────────
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: toolDefinitions,
+    tools: allToolDefinitions,
   }));
 
   // ── Call tool ─────────────────────────────────────────────────────────────
