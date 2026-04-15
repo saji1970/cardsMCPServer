@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
@@ -27,6 +28,7 @@ import { listCardProducts } from "../data/card-catalog";
 import { cardService } from "../services/card.service";
 import { promoService } from "../services/promo.service";
 import { logger } from "../utils/logger";
+import { mountStreamableMcpHttp } from "./mcp-streamable-http";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads", "openapi");
 
@@ -67,7 +69,25 @@ const upload = multer({
 export function createHttpApp(): express.Express {
   const app = express();
   app.disable("x-powered-by");
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "mcp-session-id",
+        "Mcp-Session-Id",
+        "MCP-Protocol-Version",
+        "Accept",
+      ],
+      exposedHeaders: ["mcp-session-id", "Mcp-Session-Id"],
+    })
+  );
   app.use(express.json({ limit: "8mb" }));
+
+  mountStreamableMcpHttp(app);
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "cards-mcp-gateway", time: new Date().toISOString() });
@@ -305,7 +325,7 @@ export function createHttpApp(): express.Express {
       res.type("html").send(
         `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cards MCP Gateway</title></head><body>
         <p>API is up. UI static files not found (run <code>npm run build</code>).</p>
-        <ul><li><a href="/health">/health</a></li><li><a href="/api/tools">/api/tools</a></li></ul>
+        <ul><li><a href="/health">/health</a></li><li><a href="/api/tools">/api/tools</a></li><li><code>/mcp</code> — MCP Streamable HTTP (see ANDROID_MCP.md)</li></ul>
         </body></html>`
       );
     });

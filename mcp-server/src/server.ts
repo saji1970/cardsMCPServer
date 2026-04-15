@@ -1,17 +1,8 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config/env";
 import { bootstrapOpenApiTools } from "./openapi/bootstrap";
+import { createCardsMcpServer } from "./mcp/cards-mcp-server";
 import { logger } from "./utils/logger";
-import { staticToolDefinitions, handleToolCall } from "./tools/registry";
-import { getDynamicToolBundle } from "./tools/dynamic-tools-state";
-import { resourceDefinitions, handleResourceRead } from "./resources/resources";
 
 async function main(): Promise<void> {
   logger.info("Initializing Cards MCP Server", {
@@ -25,48 +16,8 @@ async function main(): Promise<void> {
   } catch (err) {
     logger.error("OpenAPI bootstrap failed", { error: (err as Error).message });
   }
-  const dyn = getDynamicToolBundle();
-  const openApiTools = dyn?.tools ?? [];
-  const allToolDefinitions = [...staticToolDefinitions, ...openApiTools];
 
-  const server = new Server(
-    {
-      name: "cards-rewards-promotions",
-      version: "1.0.0",
-    },
-    {
-      capabilities: {
-        tools: {},
-        resources: {},
-      },
-    }
-  );
-
-  // ── List tools ────────────────────────────────────────────────────────────
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: allToolDefinitions,
-  }));
-
-  // ── Call tool ─────────────────────────────────────────────────────────────
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-    logger.info("Tool call received", { tool: name });
-    return handleToolCall(name, args ?? {});
-  });
-
-  // ── List resources ────────────────────────────────────────────────────────
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: resourceDefinitions,
-  }));
-
-  // ── Read resource ─────────────────────────────────────────────────────────
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    const { uri } = request.params;
-    logger.info("Resource read", { uri });
-    return handleResourceRead(uri);
-  });
-
-  // ── Start transport ─────────────────────────────────────────────────────────
+  const server = createCardsMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

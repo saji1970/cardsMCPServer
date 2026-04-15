@@ -22,6 +22,7 @@ For any **public** URL, set **`ADMIN_API_TOKEN`** so only clients with `Authoriz
 
 - **UI + API:** `https://<your-service>.up.railway.app/`
 - **Health:** `GET /health`
+- **MCP (Streamable HTTP, for Android / remote agents):** `POST|GET|DELETE https://<your-service>.up.railway.app/mcp` — see **`ANDROID_MCP.md`**. Optional env **`MCP_API_TOKEN`** (send as `Authorization: Bearer …`).
 
 ## Local stdio MCP (Cursor)
 
