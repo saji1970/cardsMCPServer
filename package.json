@@ -1,0 +1,14 @@
+{
+  "name": "cards-mcpserver",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Railway/Railpack root: build and start the app in mcp-server/",
+  "scripts": {
+    "postinstall": "npm install --prefix mcp-server",
+    "build": "npm run build --prefix mcp-server",
+    "start": "npm run start:http --prefix mcp-server"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

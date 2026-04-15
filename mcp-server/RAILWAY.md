@@ -2,8 +2,8 @@
 
 For any **public** URL, set **`ADMIN_API_TOKEN`** so only clients with `Authorization: Bearer …` can change bank endpoints, upload OpenAPI specs, or run the tool sandbox (which can trigger mock payments).
 
-1. Create a **new Railway project** and connect this repo (or push `mcp-server` as its own repo).
-2. Set **Root Directory** to `mcp-server` if the repo root is `cardsMCPServer`.
+1. Create a **new Railway project** and connect this repo.
+2. **Root directory:** leave as **repository root** (`cardsMCPServer`). A root `package.json` runs **`postinstall`** → installs `mcp-server/` deps, then **`npm run build`** → builds the server + UI, then **`npm start`** → `start:http`. (You can still set root to **`mcp-server`** only if you remove the root wrapper and rely on `mcp-server/package.json` alone — older Nixpacks-style setups.)
 3. Railway runs **`npm install`** and **`npm run build`** (TypeScript + Vite UI into `dist/public`).
 4. Start command: **`npm run start:http`** (already set in `railway.json`). The app listens on **`PORT`** (Railway injects it).
 
