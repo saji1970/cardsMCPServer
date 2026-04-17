@@ -33,7 +33,7 @@ export const config = {
   authToken: process.env.AUTH_TOKEN || "dev-token-changeme",
   logLevel: process.env.LOG_LEVEL || "info",
   cacheTtlSeconds: parseInt(process.env.CACHE_TTL_SECONDS || "300", 10),
-  simulationMode: process.env.SIMULATION_MODE === "true",
+  simulationMode: process.env.SIMULATION_MODE !== "false",
   /** Semicolon- or comma-separated paths to OpenAPI 3.x JSON/YAML files; each becomes MCP tools prefixed with `ext_`. */
   openApiSpecPaths: parseOpenApiSpecPaths(process.env.OPENAPI_SPEC_PATHS),
   /** Optional Bearer token sent as Authorization for dynamically generated OpenAPI tools. */
