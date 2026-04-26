@@ -141,6 +141,10 @@ export function App(): React.ReactElement {
   const [loginPw, setLoginPw] = useState("");
   const [loginErr, setLoginErr] = useState<string | null>(null);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [regName, setRegName] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regRole, setRegRole] = useState<"consumer" | "publisher">("consumer");
 
   const isAdmin = authUser?.roles.includes("admin") ?? false;
   const userId = authUser?.userId ?? "demo-user";
@@ -169,44 +173,117 @@ export function App(): React.ReactElement {
     }
   };
 
+  const doRegister = async () => {
+    setLoginErr(null);
+    setLoginLoading(true);
+    try {
+      const r = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: loginId, displayName: regName, email: regEmail, password: loginPw, role: regRole }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setLoginErr(d.error || "Registration failed");
+        return;
+      }
+      const user = d.user as AuthUser;
+      setAuthUser(user);
+      localStorage.setItem(AUTH_KEY, JSON.stringify(user));
+    } catch (e) {
+      setLoginErr((e as Error).message);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
   const doLogout = () => {
     setAuthUser(null);
     localStorage.removeItem(AUTH_KEY);
     setLoginId("");
     setLoginPw("");
-    setTab("marketplace");
+    setRegName("");
+    setRegEmail("");
+    setAuthMode("login");
   };
 
-  // ── If not logged in, show login screen ─────────────────────────────────
+  const switchAuthMode = () => {
+    setLoginErr(null);
+    setAuthMode(authMode === "login" ? "register" : "login");
+  };
+
+  // ── If not logged in, show login/register screen ────────────────────────
   if (!authUser) {
+    const isRegister = authMode === "register";
+    const canSubmit = isRegister
+      ? !!(loginId && loginPw && regName && regEmail)
+      : !!(loginId && loginPw);
+    const onSubmit = isRegister ? doRegister : doLogin;
+
     return (
       <div className="login-backdrop">
         <div className="login-card">
           <h1>Cards MCP</h1>
-          <p className="sub">Sign in to continue</p>
+          <p className="sub">{isRegister ? "Create a new account" : "Sign in to continue"}</p>
           <label>User ID</label>
           <input
             value={loginId}
             onChange={(e) => setLoginId(e.target.value)}
-            placeholder="e.g. admin"
+            placeholder={isRegister ? "Choose a user ID" : "e.g. admin"}
             autoFocus
-            onKeyDown={(e) => { if (e.key === "Enter") void doLogin(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") void onSubmit(); }}
           />
+          {isRegister && (
+            <>
+              <label>Display Name</label>
+              <input
+                value={regName}
+                onChange={(e) => setRegName(e.target.value)}
+                placeholder="Your full name"
+                onKeyDown={(e) => { if (e.key === "Enter") void onSubmit(); }}
+              />
+              <label>Email</label>
+              <input
+                type="email"
+                value={regEmail}
+                onChange={(e) => setRegEmail(e.target.value)}
+                placeholder="you@example.com"
+                onKeyDown={(e) => { if (e.key === "Enter") void onSubmit(); }}
+              />
+            </>
+          )}
           <label>Password</label>
           <input
             type="password"
             value={loginPw}
             onChange={(e) => setLoginPw(e.target.value)}
-            placeholder="Enter password"
-            onKeyDown={(e) => { if (e.key === "Enter") void doLogin(); }}
+            placeholder={isRegister ? "Min 4 characters" : "Enter password"}
+            onKeyDown={(e) => { if (e.key === "Enter") void onSubmit(); }}
           />
+          {isRegister && (
+            <>
+              <label>Role</label>
+              <select value={regRole} onChange={(e) => setRegRole(e.target.value as "consumer" | "publisher")}>
+                <option value="consumer">Consumer</option>
+                <option value="publisher">Publisher</option>
+              </select>
+            </>
+          )}
           {loginErr && <p className="err">{loginErr}</p>}
-          <button type="button" className="login-btn" disabled={loginLoading || !loginId || !loginPw} onClick={() => void doLogin()}>
-            {loginLoading ? "Signing in..." : "Sign in"}
+          <button type="button" className="login-btn" disabled={loginLoading || !canSubmit} onClick={() => void onSubmit()}>
+            {loginLoading ? (isRegister ? "Creating account..." : "Signing in...") : (isRegister ? "Create account" : "Sign in")}
           </button>
-          <p className="sub" style={{ marginTop: "1rem", fontSize: "0.78rem" }}>
-            Demo accounts: admin / admin@123, demo-user / demo
+          <p className="auth-toggle">
+            {isRegister ? "Already have an account? " : "Don't have an account? "}
+            <button type="button" className="auth-toggle-link" onClick={switchAuthMode}>
+              {isRegister ? "Sign in" : "Register"}
+            </button>
           </p>
+          {!isRegister && (
+            <p className="sub" style={{ marginTop: "0.5rem", fontSize: "0.78rem" }}>
+              Demo accounts: admin / admin@123, demo-user / demo
+            </p>
+          )}
         </div>
       </div>
     );
@@ -271,6 +348,12 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
 
   // ── Admin: Users state ──────────────────────────────────────────────────
   const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>([]);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [addUserForm, setAddUserForm] = useState({ userId: "", displayName: "", email: "", password: "" });
+  const [addUserRoles, setAddUserRoles] = useState<Set<string>>(new Set());
+  const [addUserMsg, setAddUserMsg] = useState<string | null>(null);
+  const [addUserErr, setAddUserErr] = useState<string | null>(null);
+  const [resetPwResult, setResetPwResult] = useState<{ userId: string; password: string } | null>(null);
 
   // ── Admin: Audit state ──────────────────────────────────────────────────
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
@@ -329,6 +412,54 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
   useEffect(() => {
     if (tab === "users" && isAdmin) void loadUsers();
   }, [tab, isAdmin, loadUsers]);
+
+  const createAdminUser = async () => {
+    setAddUserErr(null);
+    setAddUserMsg(null);
+    if (!addUserForm.userId || !addUserForm.displayName || !addUserForm.email || !addUserForm.password) {
+      setAddUserErr("All fields are required");
+      return;
+    }
+    if (addUserRoles.size === 0) {
+      setAddUserErr("Select at least one role");
+      return;
+    }
+    try {
+      const r = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...addUserForm, roles: Array.from(addUserRoles) }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setAddUserErr(d.error || "Failed to create user");
+        return;
+      }
+      setAddUserMsg(`User "${addUserForm.userId}" created successfully`);
+      setAddUserForm({ userId: "", displayName: "", email: "", password: "" });
+      setAddUserRoles(new Set());
+      setShowAddUser(false);
+      void loadUsers();
+    } catch (e) {
+      setAddUserErr((e as Error).message);
+    }
+  };
+
+  const resetPassword = async (targetUserId: string) => {
+    setResetPwResult(null);
+    setAddUserMsg(null);
+    try {
+      const r = await fetch(`/api/admin/users/${encodeURIComponent(targetUserId)}/reset-password`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setAddUserMsg(d.error || "Failed to reset password");
+        return;
+      }
+      setResetPwResult({ userId: targetUserId, password: d.temporaryPassword });
+    } catch (e) {
+      setAddUserMsg((e as Error).message);
+    }
+  };
 
   // ── Load audit when Audit tab is active ─────────────────────────────────
   const loadAudit = useCallback(async () => {
@@ -1072,10 +1203,62 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
           <p className="sub" style={{ marginTop: 0 }}>All registered users and their roles. {platformUsers.length} users total.</p>
           <div className="row" style={{ marginBottom: "0.75rem" }}>
             <button type="button" className="primary" onClick={() => void loadUsers()}>Refresh</button>
+            <button type="button" className="secondary" onClick={() => { setShowAddUser(!showAddUser); setAddUserErr(null); setAddUserMsg(null); }}>
+              {showAddUser ? "Cancel" : "Add User"}
+            </button>
           </div>
+          {addUserMsg && <p className="ok">{addUserMsg}</p>}
+          {resetPwResult && (
+            <div className="reset-pw-banner">
+              <strong>Password reset for <code>{resetPwResult.userId}</code>:</strong>{" "}
+              <code className="temp-pw">{resetPwResult.password}</code>
+              <button type="button" className="secondary" style={{ marginLeft: "0.5rem", padding: "0.2rem 0.5rem", fontSize: "0.78rem" }}
+                onClick={() => { void navigator.clipboard.writeText(resetPwResult.password); }}>
+                Copy
+              </button>
+              <button type="button" className="secondary" style={{ marginLeft: "0.25rem", padding: "0.2rem 0.5rem", fontSize: "0.78rem" }}
+                onClick={() => setResetPwResult(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
+          {showAddUser && (
+            <div className="add-user-form">
+              <div className="mp-section-title">Create User</div>
+              <label>User ID</label>
+              <input value={addUserForm.userId} onChange={(e) => setAddUserForm({ ...addUserForm, userId: e.target.value })} placeholder="e.g. jane-doe" />
+              <label>Display Name</label>
+              <input value={addUserForm.displayName} onChange={(e) => setAddUserForm({ ...addUserForm, displayName: e.target.value })} placeholder="Jane Doe" />
+              <label>Email</label>
+              <input type="email" value={addUserForm.email} onChange={(e) => setAddUserForm({ ...addUserForm, email: e.target.value })} placeholder="jane@example.com" />
+              <label>Password</label>
+              <input type="password" value={addUserForm.password} onChange={(e) => setAddUserForm({ ...addUserForm, password: e.target.value })} placeholder="Min 4 characters" />
+              <label>Roles</label>
+              <div className="role-checkbox-group">
+                {["consumer", "publisher", "consumer_publisher", "admin", "operations", "finance", "support"].map((r) => (
+                  <label key={r} className="role-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={addUserRoles.has(r)}
+                      onChange={(e) => {
+                        const next = new Set(addUserRoles);
+                        if (e.target.checked) next.add(r); else next.delete(r);
+                        setAddUserRoles(next);
+                      }}
+                    />
+                    {r}
+                  </label>
+                ))}
+              </div>
+              {addUserErr && <p className="err">{addUserErr}</p>}
+              <div className="row">
+                <button type="button" className="primary" onClick={() => void createAdminUser()}>Create User</button>
+              </div>
+            </div>
+          )}
           <table className="admin-table">
             <thead>
-              <tr><th>User ID</th><th>Name</th><th>Email</th><th>Roles</th><th>Status</th><th>Last Active</th></tr>
+              <tr><th>User ID</th><th>Name</th><th>Email</th><th>Roles</th><th>Status</th><th>Last Active</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {platformUsers.map((u) => (
@@ -1094,6 +1277,11 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
                   </td>
                   <td style={{ fontSize: "0.78rem", color: "#5a6480" }}>
                     {new Date(u.lastActiveAt).toLocaleString()}
+                  </td>
+                  <td>
+                    <button type="button" className="reset-pw-btn" onClick={() => void resetPassword(u.userId)}>
+                      Reset password
+                    </button>
                   </td>
                 </tr>
               ))}

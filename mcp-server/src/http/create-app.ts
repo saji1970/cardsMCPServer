@@ -148,6 +148,94 @@ export function createHttpApp(): express.Express {
     });
   });
 
+  // ── Public registration ──────────────────────────────────────────────────
+  app.post("/api/auth/register", (req, res) => {
+    const { userId, displayName, email, password, role } = req.body as {
+      userId?: string; displayName?: string; email?: string; password?: string; role?: string;
+    };
+    if (!userId || !displayName || !email || !password || !role) {
+      res.status(400).json({ success: false, error: "userId, displayName, email, password, and role are required" });
+      return;
+    }
+    if (role !== "consumer" && role !== "publisher") {
+      res.status(400).json({ success: false, error: "role must be 'consumer' or 'publisher'" });
+      return;
+    }
+    if (password.length < 4) {
+      res.status(400).json({ success: false, error: "Password must be at least 4 characters" });
+      return;
+    }
+    if (userStore.get(userId)) {
+      res.status(409).json({ success: false, error: "User ID is already taken" });
+      return;
+    }
+    try {
+      const user = userStore.create({ userId, displayName, email, roles: [role] });
+      userStore.setPassword(userId, password);
+      res.json({
+        success: true,
+        user: { userId: user.userId, displayName: user.displayName, email: user.email, roles: user.roles },
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  // ── Admin user creation ─────────────────────────────────────────────────
+  app.post("/api/admin/users", (req, res) => {
+    const { userId, displayName, email, password, roles } = req.body as {
+      userId?: string; displayName?: string; email?: string; password?: string; roles?: string[];
+    };
+    if (!userId || !displayName || !email || !password || !roles || !Array.isArray(roles) || roles.length === 0) {
+      res.status(400).json({ success: false, error: "userId, displayName, email, password, and roles[] are required" });
+      return;
+    }
+    const validRoles = ["consumer", "publisher", "consumer_publisher", "admin", "operations", "finance", "support"];
+    for (const r of roles) {
+      if (!validRoles.includes(r)) {
+        res.status(400).json({ success: false, error: `Invalid role: ${r}. Valid: ${validRoles.join(", ")}` });
+        return;
+      }
+    }
+    if (password.length < 4) {
+      res.status(400).json({ success: false, error: "Password must be at least 4 characters" });
+      return;
+    }
+    if (userStore.get(userId)) {
+      res.status(409).json({ success: false, error: "User ID is already taken" });
+      return;
+    }
+    try {
+      const user = userStore.create({ userId, displayName, email, roles: roles as import("../types/rbac").Role[] });
+      userStore.setPassword(userId, password);
+      res.json({
+        success: true,
+        user: {
+          userId: user.userId, displayName: user.displayName, email: user.email,
+          roles: user.roles, active: user.active, createdAt: user.createdAt, lastActiveAt: user.lastActiveAt,
+        },
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  // ── Admin password reset ─────────────────────────────────────────────────
+  app.post("/api/admin/users/:userId/reset-password", (req, res) => {
+    const targetId = req.params.userId;
+    const user = userStore.get(targetId);
+    if (!user) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+    // Generate a readable default password: role prefix + 4 random hex chars
+    const prefix = user.roles[0] ?? "user";
+    const rand = Math.random().toString(16).slice(2, 6);
+    const newPassword = `${prefix}-${rand}`;
+    userStore.setPassword(targetId, newPassword);
+    res.json({ success: true, userId: targetId, temporaryPassword: newPassword });
+  });
+
   app.get("/api/admin/users", (_req, res) => {
     const users = userStore.list();
     res.json({

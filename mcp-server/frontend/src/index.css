@@ -679,6 +679,25 @@ pre.out {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.auth-toggle {
+  text-align: center;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: #9aa3b5;
+}
+.auth-toggle-link {
+  background: none;
+  border: none;
+  color: #7cb7ff;
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0;
+  text-decoration: underline;
+}
+.login-card select {
+  max-width: 100%;
+  margin-top: 0.2rem;
+}
 
 /* ── Header user badge ─────────────────────────────────────────────────────── */
 
@@ -809,4 +828,84 @@ pre.out {
 .admin-filters input,
 .admin-filters select {
   max-width: 200px;
+}
+
+/* ── Add User form ─────────────────────────────────────────────────────────── */
+
+.add-user-form {
+  background: #1a2235;
+  border: 1px solid #2f3a52;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.add-user-form input {
+  max-width: 100%;
+}
+.role-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+.role-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: #161b26;
+  border: 1px solid #2f3a52;
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.82rem;
+  color: #c5ccda;
+  cursor: pointer;
+  margin-top: 0;
+  transition: border-color 0.15s;
+}
+.role-checkbox:hover {
+  border-color: #4a7fd4;
+}
+.role-checkbox input[type="checkbox"] {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  accent-color: #3d6fb8;
+}
+
+/* ── Reset password ────────────────────────────────────────────────────────── */
+
+.reset-pw-btn {
+  background: #1a2a4a;
+  border: 1px solid #2f3a52;
+  color: #60a5fa;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: border-color 0.15s;
+}
+.reset-pw-btn:hover {
+  border-color: #4a7fd4;
+  background: #1e3460;
+}
+.reset-pw-banner {
+  background: #1a2a3a;
+  border: 1px solid #2d4a7c;
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.temp-pw {
+  background: #0f1117;
+  color: #4ade80;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
 }
