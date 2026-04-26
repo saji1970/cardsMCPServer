@@ -40,4 +40,6 @@ export const config = {
   openApiHttpBearer: process.env.OPENAPI_HTTP_BEARER || "",
   /** Optional JSON object of extra HTTP headers for OpenAPI tools, e.g. {"X-Api-Key":"..."}. */
   openApiExtraHeaders: parseOpenApiExtraHeaders(process.env.OPENAPI_HTTP_HEADERS_JSON),
+  /** Enable role-based access control. Defaults to false (no enforcement). */
+  rbacEnabled: process.env.RBAC_ENABLED === "true",
 } as const;

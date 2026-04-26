@@ -2,6 +2,10 @@ import { listCardProducts } from "../data/card-catalog";
 import { cardService } from "../services/card.service";
 import { rewardsService } from "../services/rewards.service";
 import { promoService } from "../services/promo.service";
+import { marketplaceService } from "../services/marketplace.service";
+import { entitlementService, EntitlementError } from "../services/entitlement.service";
+import { config } from "../config/env";
+import type { UserContext } from "../types/rbac";
 import { logger } from "../utils/logger";
 
 export const resourceDefinitions = [
@@ -30,13 +34,35 @@ export const resourceDefinitions = [
       "Issuer card products with marketing summaries, feature lists, and strong spend categories for comparing payment options",
     mimeType: "application/json",
   },
+  {
+    uri: "agents://marketplace",
+    name: "Agent Marketplace",
+    description:
+      "Available AI agents with capabilities, descriptions, and pricing for card rewards optimization",
+    mimeType: "application/json",
+  },
 ];
 
 type ResourceResult = {
   contents: Array<{ uri: string; mimeType: string; text: string }>;
 };
 
-export async function handleResourceRead(uri: string): Promise<ResourceResult> {
+export async function handleResourceRead(uri: string, userContext?: UserContext): Promise<ResourceResult> {
+  // ── RBAC gate ──────────────────────────────────────────────────────────
+  if (config.rbacEnabled && userContext) {
+    const permission = `resource:${uri}`;
+    try {
+      entitlementService.assertPermission(userContext, permission);
+      entitlementService.recordAccess(userContext.userId, permission);
+    } catch (err) {
+      if (err instanceof EntitlementError) {
+        entitlementService.recordDenied(userContext.userId, permission);
+        throw err;
+      }
+      throw err;
+    }
+  }
+
   switch (uri) {
     case "cards://user": {
       logger.info("Resource: cards://user");
@@ -116,6 +142,20 @@ export async function handleResourceRead(uri: string): Promise<ResourceResult> {
             uri,
             mimeType: "application/json",
             text: JSON.stringify(products, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "agents://marketplace": {
+      logger.info("Resource: agents://marketplace");
+      const agents = marketplaceService.listAgents();
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(agents, null, 2),
           },
         ],
       };

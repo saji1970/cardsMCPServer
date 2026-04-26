@@ -24,6 +24,9 @@ import { clearHttpClientCache } from "../adapters/http-clients";
 import { bootstrapOpenApiTools, collectAllOpenApiSpecPaths } from "../openapi/bootstrap";
 import { staticToolDefinitions, handleToolCall } from "../tools/registry";
 import { getDynamicToolBundle } from "../tools/dynamic-tools-state";
+import { entitlementService } from "../services/entitlement.service";
+import { userStore } from "../data/user-store";
+import { marketplaceService, AgentCategory } from "../services/marketplace.service";
 import { listCardProducts } from "../data/card-catalog";
 import { cardService } from "../services/card.service";
 import { promoService } from "../services/promo.service";
@@ -81,6 +84,7 @@ export function createHttpApp(): express.Express {
         "Mcp-Session-Id",
         "MCP-Protocol-Version",
         "Accept",
+        "X-User-Id",
       ],
       exposedHeaders: ["mcp-session-id", "Mcp-Session-Id"],
     })
@@ -91,6 +95,82 @@ export function createHttpApp(): express.Express {
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "cards-mcp-gateway", time: new Date().toISOString() });
+  });
+
+  // ── Auth endpoints ──────────────────────────────────────────────────────
+
+  app.post("/api/auth/login", (req, res) => {
+    const { userId, password } = req.body as { userId?: string; password?: string };
+    if (!userId || !password) {
+      res.status(400).json({ success: false, error: "userId and password are required" });
+      return;
+    }
+    const user = userStore.get(userId);
+    if (!user || !user.active) {
+      res.status(401).json({ success: false, error: "Invalid credentials" });
+      return;
+    }
+    if (!userStore.verifyPassword(userId, password)) {
+      res.status(401).json({ success: false, error: "Invalid credentials" });
+      return;
+    }
+    userStore.touchLastActive(userId);
+    res.json({
+      success: true,
+      user: {
+        userId: user.userId,
+        displayName: user.displayName,
+        email: user.email,
+        roles: user.roles,
+      },
+    });
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+    if (!userId) {
+      res.status(400).json({ success: false, error: "userId query parameter required" });
+      return;
+    }
+    const user = userStore.get(userId);
+    if (!user || !user.active) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+    res.json({
+      success: true,
+      user: {
+        userId: user.userId,
+        displayName: user.displayName,
+        email: user.email,
+        roles: user.roles,
+      },
+    });
+  });
+
+  app.get("/api/admin/users", (_req, res) => {
+    const users = userStore.list();
+    res.json({
+      success: true,
+      count: users.length,
+      users: users.map((u) => ({
+        userId: u.userId,
+        displayName: u.displayName,
+        email: u.email,
+        roles: u.roles,
+        active: u.active,
+        createdAt: u.createdAt,
+        lastActiveAt: u.lastActiveAt,
+      })),
+    });
+  });
+
+  app.get("/api/admin/audit", (req, res) => {
+    const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+    const actionPrefix = typeof req.query.actionPrefix === "string" ? req.query.actionPrefix : undefined;
+    const limit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : undefined;
+    const entries = entitlementService.queryAuditLog({ userId, actionPrefix, limit });
+    res.json({ success: true, count: entries.length, entries });
   });
 
   app.get("/api/catalog/products", (_req, res) => {
@@ -281,12 +361,14 @@ export function createHttpApp(): express.Express {
 
   app.post("/api/sandbox/invoke", requireAdmin, async (req, res) => {
     try {
-      const { name, arguments: args } = req.body as { name?: string; arguments?: Record<string, unknown> };
+      const { name, arguments: args, userId } = req.body as { name?: string; arguments?: Record<string, unknown>; userId?: string };
       if (!name || typeof name !== "string") {
         res.status(400).json({ success: false, error: 'Body requires "name" (tool name)' });
         return;
       }
-      const result = await handleToolCall(name, args ?? {});
+      const xUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"] : userId;
+      const userContext = xUserId ? entitlementService.resolveContext(xUserId) : undefined;
+      const result = await handleToolCall(name, args ?? {}, userContext);
       res.json({
         success: !result.isError,
         isError: result.isError,
@@ -301,18 +383,125 @@ export function createHttpApp(): express.Express {
   if (process.env.SANDBOX_PUBLIC === "true") {
     app.post("/api/sandbox/invoke-public", async (req, res) => {
       try {
-        const { name, arguments: args } = req.body as { name?: string; arguments?: Record<string, unknown> };
+        const { name, arguments: args, userId } = req.body as { name?: string; arguments?: Record<string, unknown>; userId?: string };
         if (!name || typeof name !== "string") {
           res.status(400).json({ success: false, error: 'Body requires "name"' });
           return;
         }
-        const result = await handleToolCall(name, args ?? {});
+        const xUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"] : userId;
+        const userContext = xUserId ? entitlementService.resolveContext(xUserId) : undefined;
+        const result = await handleToolCall(name, args ?? {}, userContext);
         res.json({ success: !result.isError, isError: result.isError, content: result.content });
       } catch (e) {
         res.status(500).json({ success: false, error: (e as Error).message });
       }
     });
   }
+
+  // ── Marketplace API ──────────────────────────────────────────────────────
+
+  app.get("/api/marketplace/agents", (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : undefined;
+    const category = typeof req.query.category === "string" ? (req.query.category as AgentCategory) : undefined;
+    const sort = typeof req.query.sort === "string" ? (req.query.sort as "rating" | "installs" | "newest" | "price") : undefined;
+    const agents = marketplaceService.listAgents({ query: q, category, sort });
+    res.json({ success: true, count: agents.length, agents });
+  });
+
+  app.get("/api/marketplace/agents/featured", (_req, res) => {
+    const agents = marketplaceService.getFeatured();
+    res.json({ success: true, agents });
+  });
+
+  app.get("/api/marketplace/agents/:id", (req, res) => {
+    const agent = marketplaceService.getAgent(req.params.id);
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    res.json({ success: true, agent });
+  });
+
+  app.get("/api/marketplace/agents/:id/reviews", (req, res) => {
+    const reviews = marketplaceService.getReviews(req.params.id);
+    res.json({ success: true, count: reviews.length, reviews });
+  });
+
+  app.post("/api/marketplace/agents/:id/reviews", (req, res) => {
+    const { userId, userName, rating, comment } = req.body as { userId?: string; userName?: string; rating?: number; comment?: string };
+    if (!userId || !userName || !rating || !comment) {
+      res.status(400).json({ success: false, error: "userId, userName, rating, and comment are required" });
+      return;
+    }
+    const review = marketplaceService.addReview({ agentId: req.params.id, userId, userName, rating, comment });
+    if (!review) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    res.json({ success: true, review });
+  });
+
+  app.post("/api/marketplace/agents/:id/install", (req, res) => {
+    const userId = (req.body as { userId?: string }).userId ?? (typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"] : "demo-user");
+    const installation = marketplaceService.installAgent(req.params.id, userId);
+    if (!installation) { res.status(404).json({ success: false, error: "Agent not found or not published" }); return; }
+    res.json({ success: true, installation });
+  });
+
+  app.post("/api/marketplace/agents/:id/uninstall", (req, res) => {
+    const userId = (req.body as { userId?: string }).userId ?? (typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"] : "demo-user");
+    const ok = marketplaceService.uninstallAgent(req.params.id, userId);
+    if (!ok) { res.status(404).json({ success: false, error: "Agent not installed or not found" }); return; }
+    res.json({ success: true });
+  });
+
+  app.get("/api/marketplace/user/:userId/installed", (req, res) => {
+    const installations = marketplaceService.getUserInstallations(req.params.userId);
+    res.json({ success: true, count: installations.length, installations });
+  });
+
+  app.post("/api/marketplace/publish", (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const required = ["agentId", "name", "shortDescription", "fullDescription", "icon", "category", "publisherId", "publisherName", "version", "capabilities"];
+      for (const field of required) {
+        if (!body[field]) { res.status(400).json({ success: false, error: `Missing required field: ${field}` }); return; }
+      }
+      const pricingType = (body.pricingType as string) || "free";
+      let pricing: import("../services/marketplace.service").PricingModel;
+      if (pricingType === "one_time") pricing = { type: "one_time", price: Number(body.price) || 0 };
+      else if (pricingType === "subscription") pricing = { type: "subscription", price: Number(body.price) || 0, interval: (body.priceInterval as "month" | "year") || "month" };
+      else pricing = { type: "free" };
+
+      const agent = marketplaceService.publishAgent({
+        agentId: body.agentId as string,
+        name: body.name as string,
+        shortDescription: body.shortDescription as string,
+        fullDescription: body.fullDescription as string,
+        icon: body.icon as string,
+        category: body.category as AgentCategory,
+        tags: (body.tags as string[]) || [],
+        publisherId: body.publisherId as string,
+        publisherName: body.publisherName as string,
+        version: body.version as string,
+        pricing,
+        capabilities: body.capabilities as string[],
+      });
+      res.json({ success: true, agent });
+    } catch (e) {
+      res.status(500).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/marketplace/agents/:id", (req, res) => {
+    const agent = marketplaceService.updateAgent(req.params.id, req.body as Record<string, unknown>);
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    res.json({ success: true, agent });
+  });
+
+  app.get("/api/marketplace/publisher/:id/agents", (req, res) => {
+    const agents = marketplaceService.getPublisherAgents(req.params.id);
+    res.json({ success: true, count: agents.length, agents });
+  });
+
+  app.get("/api/marketplace/publisher/:id/revenue", (req, res) => {
+    const revenue = marketplaceService.getPublisherRevenue(req.params.id);
+    res.json({ success: true, ...revenue });
+  });
 
   const staticDir = path.join(__dirname, "..", "public");
   if (fs.existsSync(staticDir)) {

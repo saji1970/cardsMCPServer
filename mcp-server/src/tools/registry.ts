@@ -4,6 +4,12 @@ import { rewardsService } from "../services/rewards.service";
 import { promoService } from "../services/promo.service";
 import { decisionEngine } from "../services/decision.engine";
 import { featuresRelevantToPurchase, purchaseService } from "../services/purchase.service";
+import { marketplaceService } from "../services/marketplace.service";
+import { entitlementService, EntitlementError } from "../services/entitlement.service";
+import { userStore } from "../data/user-store";
+import { config } from "../config/env";
+import type { UserContext } from "../types/rbac";
+import { RoleSchema } from "../types/rbac";
 import { logger } from "../utils/logger";
 import { getDynamicToolBundle } from "./dynamic-tools-state";
 
@@ -205,6 +211,163 @@ export const staticToolDefinitions = [
       required: [],
     },
   },
+  {
+    name: "optimize_cart",
+    description:
+      "Given a cart of multiple items, recommend the best payment card for each item independently. Returns per-item card recommendations with expected rewards.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        userId: { type: "string", description: "The user identifier" },
+        items: {
+          type: "array",
+          description: "Cart items to optimize",
+          items: {
+            type: "object",
+            properties: {
+              merchant: { type: "string", description: "Merchant name" },
+              amount: { type: "number", description: "Item amount (positive)" },
+              category: {
+                type: "string",
+                description: "Merchant category (e.g., dining, travel, groceries). Defaults to 'shopping'",
+              },
+            },
+            required: ["merchant", "amount"],
+          },
+        },
+      },
+      required: ["userId", "items"],
+    },
+  },
+  {
+    name: "list_agents",
+    description:
+      "List all available AI agents in the marketplace with their capabilities, descriptions, and pricing.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "get_agent",
+    description:
+      "Get details for a specific marketplace agent by ID, including capabilities and pricing.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        agentId: { type: "string", description: "The agent identifier (e.g. default_optimizer)" },
+      },
+      required: ["agentId"],
+    },
+  },
+  {
+    name: "publish_agent",
+    description:
+      "Publish a new AI agent to the marketplace. Requires publisher, consumer_publisher, or admin role.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        agentId: { type: "string", description: "Unique agent identifier (slug)" },
+        name: { type: "string", description: "Agent display name" },
+        shortDescription: { type: "string", description: "One-line description (max 100 chars)" },
+        fullDescription: { type: "string", description: "Full marketing description" },
+        icon: { type: "string", description: "Emoji icon for the agent" },
+        category: {
+          type: "string",
+          enum: ["finance", "travel", "shopping", "productivity", "utilities", "lifestyle"],
+          description: "Agent category",
+        },
+        tags: { type: "array", items: { type: "string" }, description: "Searchable tags" },
+        publisherId: { type: "string", description: "Publisher identifier" },
+        publisherName: { type: "string", description: "Publisher display name" },
+        version: { type: "string", description: "Semantic version (e.g. 1.0.0)" },
+        pricingType: {
+          type: "string",
+          enum: ["free", "one_time", "subscription"],
+          description: "Pricing model",
+        },
+        price: { type: "number", description: "Price (required for one_time and subscription)" },
+        priceInterval: {
+          type: "string",
+          enum: ["month", "year"],
+          description: "Billing interval (required for subscription)",
+        },
+        capabilities: { type: "array", items: { type: "string" }, description: "MCP tool capabilities" },
+      },
+      required: ["agentId", "name", "shortDescription", "fullDescription", "icon", "category", "publisherId", "publisherName", "version", "pricingType", "capabilities"],
+    },
+  },
+  {
+    name: "install_agent",
+    description:
+      "Install a marketplace agent for the current user. Returns installation confirmation.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        agentId: { type: "string", description: "The agent to install" },
+        userId: { type: "string", description: "The user installing the agent" },
+      },
+      required: ["agentId", "userId"],
+    },
+  },
+  {
+    name: "review_agent",
+    description:
+      "Submit a review and rating for an installed marketplace agent.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        agentId: { type: "string", description: "The agent to review" },
+        userId: { type: "string", description: "The reviewer's user id" },
+        userName: { type: "string", description: "Display name for the review" },
+        rating: { type: "number", description: "Rating from 1 to 5" },
+        comment: { type: "string", description: "Review text" },
+      },
+      required: ["agentId", "userId", "userName", "rating", "comment"],
+    },
+  },
+  {
+    name: "manage_users",
+    description:
+      "Manage platform users: list, create, update, or deactivate. Requires admin role when RBAC is enabled.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "create", "update", "deactivate"],
+          description: "Action to perform",
+        },
+        userId: { type: "string", description: "Target userId (required for create/update/deactivate)" },
+        displayName: { type: "string", description: "Display name (create/update)" },
+        email: { type: "string", description: "Email (create/update)" },
+        roles: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["consumer", "publisher", "consumer_publisher", "admin", "operations", "finance", "support"],
+          },
+          description: "Roles to assign (create/update)",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "get_audit_log",
+    description:
+      "Query the RBAC audit log. Filter by userId, action prefix, or limit. Available to admin, finance, and support roles.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        userId: { type: "string", description: "Filter by userId" },
+        actionPrefix: { type: "string", description: "Filter by action prefix (e.g. 'tool:')" },
+        limit: { type: "number", description: "Max entries to return (default 100)" },
+      },
+      required: [],
+    },
+  },
 ];
 
 /** Built-in tools only; server merges OpenAPI-generated tools at runtime. */
@@ -277,6 +440,65 @@ const EvaluatePurchasePaymentInput = z.object({
   purchaseNotes: z.string().optional(),
 });
 
+const OptimizeCartInput = z.object({
+  userId: z.string(),
+  items: z.array(
+    z.object({
+      merchant: z.string(),
+      amount: z.number().positive(),
+      category: z.string().optional().default("shopping"),
+    })
+  ),
+});
+
+const GetAgentInput = z.object({
+  agentId: z.string(),
+});
+
+const PublishAgentInput = z.object({
+  agentId: z.string(),
+  name: z.string(),
+  shortDescription: z.string(),
+  fullDescription: z.string(),
+  icon: z.string(),
+  category: z.enum(["finance", "travel", "shopping", "productivity", "utilities", "lifestyle"]),
+  tags: z.array(z.string()).optional().default([]),
+  publisherId: z.string(),
+  publisherName: z.string(),
+  version: z.string(),
+  pricingType: z.enum(["free", "one_time", "subscription"]),
+  price: z.number().optional(),
+  priceInterval: z.enum(["month", "year"]).optional(),
+  capabilities: z.array(z.string()),
+});
+
+const InstallAgentInput = z.object({
+  agentId: z.string(),
+  userId: z.string(),
+});
+
+const ReviewAgentInput = z.object({
+  agentId: z.string(),
+  userId: z.string(),
+  userName: z.string(),
+  rating: z.number().min(1).max(5),
+  comment: z.string(),
+});
+
+const ManageUsersInput = z.object({
+  action: z.enum(["list", "create", "update", "deactivate"]),
+  userId: z.string().optional(),
+  displayName: z.string().optional(),
+  email: z.string().optional(),
+  roles: z.array(RoleSchema).optional(),
+});
+
+const GetAuditLogInput = z.object({
+  userId: z.string().optional(),
+  actionPrefix: z.string().optional(),
+  limit: z.number().int().positive().optional(),
+});
+
 // ── Tool handler dispatch ───────────────────────────────────────────────────
 
 type ToolResult = {
@@ -297,9 +519,25 @@ function fail(error: string): ToolResult {
 
 export async function handleToolCall(
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  userContext?: UserContext,
 ): Promise<ToolResult> {
   try {
+    // ── RBAC gate ──────────────────────────────────────────────────────
+    if (config.rbacEnabled && userContext) {
+      const permission = `tool:${name}`;
+      try {
+        entitlementService.assertPermission(userContext, permission);
+        entitlementService.recordAccess(userContext.userId, permission);
+      } catch (err) {
+        if (err instanceof EntitlementError) {
+          entitlementService.recordDenied(userContext.userId, permission);
+          throw err;
+        }
+        throw err;
+      }
+    }
+
     const dynamicBundle = getDynamicToolBundle();
     if (dynamicBundle?.hasTool(name)) {
       return await dynamicBundle.invoke(name, args);
@@ -499,13 +737,147 @@ export async function handleToolCall(
         });
       }
 
+      // ── Cart optimization ──────────────────────────────────────────────
+      case "optimize_cart": {
+        const { userId, items } = OptimizeCartInput.parse(args);
+        const results = [];
+        for (const item of items) {
+          const strategy = await decisionEngine.recommendPaymentStrategy({
+            userId,
+            amount: item.amount,
+            merchant: item.merchant,
+            category: item.category,
+            currency: "USD",
+          });
+          results.push({
+            merchant: item.merchant,
+            amount: item.amount,
+            category: item.category,
+            recommendedCard: {
+              cardId: strategy.bestCard.card.cardId,
+              last4: strategy.bestCard.card.last4,
+              issuer: strategy.bestCard.card.issuer,
+              network: strategy.bestCard.card.network,
+            },
+            expectedRewards: strategy.bestCard.rewardValue,
+            appliedOffers: strategy.bestCard.applicablePromotions.map((p) => p.promoId),
+            estimatedSavings: strategy.estimatedSavings,
+          });
+        }
+        const totalSavings = results.reduce((sum, r) => sum + r.estimatedSavings, 0);
+        return ok({
+          success: true,
+          optimizedCart: results,
+          totalEstimatedSavings: Math.round(totalSavings * 100) / 100,
+        });
+      }
+
+      // ── Marketplace tools ──────────────────────────────────────────────
+      case "list_agents": {
+        const agents = marketplaceService.listAgents();
+        return ok({ success: true, count: agents.length, agents });
+      }
+
+      case "get_agent": {
+        const { agentId } = GetAgentInput.parse(args);
+        const agent = marketplaceService.getAgent(agentId);
+        if (!agent) return fail(`Agent ${agentId} not found`);
+        return ok({ success: true, agent });
+      }
+
+      case "publish_agent": {
+        const input = PublishAgentInput.parse(args);
+        let pricing: import("../services/marketplace.service").PricingModel;
+        if (input.pricingType === "free") {
+          pricing = { type: "free" };
+        } else if (input.pricingType === "one_time") {
+          pricing = { type: "one_time", price: input.price ?? 0 };
+        } else {
+          pricing = { type: "subscription", price: input.price ?? 0, interval: input.priceInterval ?? "month" };
+        }
+        const published = marketplaceService.publishAgent({
+          agentId: input.agentId,
+          name: input.name,
+          shortDescription: input.shortDescription,
+          fullDescription: input.fullDescription,
+          icon: input.icon,
+          category: input.category,
+          tags: input.tags,
+          publisherId: input.publisherId,
+          publisherName: input.publisherName,
+          version: input.version,
+          pricing,
+          capabilities: input.capabilities,
+        });
+        return ok({ success: true, agent: published });
+      }
+
+      case "install_agent": {
+        const { agentId, userId } = InstallAgentInput.parse(args);
+        const installation = marketplaceService.installAgent(agentId, userId);
+        if (!installation) return fail(`Agent ${agentId} not found or not published`);
+        return ok({ success: true, installation });
+      }
+
+      case "review_agent": {
+        const input = ReviewAgentInput.parse(args);
+        const review = marketplaceService.addReview(input);
+        if (!review) return fail(`Agent ${input.agentId} not found`);
+        return ok({ success: true, review });
+      }
+
+      // ── RBAC management tools ──────────────────────────────────────────
+      case "manage_users": {
+        const { action, userId, displayName, email, roles } = ManageUsersInput.parse(args);
+        switch (action) {
+          case "list":
+            return ok({ success: true, users: userStore.list() });
+          case "create": {
+            if (!userId || !displayName || !email || !roles?.length) {
+              return fail("create requires userId, displayName, email, and roles");
+            }
+            const created = userStore.create({ userId, displayName, email, roles });
+            return ok({ success: true, user: created });
+          }
+          case "update": {
+            if (!userId) return fail("update requires userId");
+            const updated = userStore.update(userId, {
+              ...(displayName ? { displayName } : {}),
+              ...(email ? { email } : {}),
+              ...(roles ? { roles } : {}),
+            });
+            return ok({ success: true, user: updated });
+          }
+          case "deactivate": {
+            if (!userId) return fail("deactivate requires userId");
+            const deactivated = userStore.update(userId, { active: false });
+            return ok({ success: true, user: deactivated });
+          }
+          default:
+            return fail(`Unknown manage_users action: ${action}`);
+        }
+      }
+
+      case "get_audit_log": {
+        const filter = GetAuditLogInput.parse(args);
+        const entries = entitlementService.queryAuditLog(filter);
+        return ok({ success: true, count: entries.length, entries });
+      }
+
       default:
         return fail(`Unknown tool: ${name}`);
     }
   } catch (err) {
+    if (err instanceof EntitlementError) {
+      logger.warn("RBAC denied", { tool: name, userId: err.userId, permission: err.permission });
+      return fail(err.message);
+    }
     if (err instanceof z.ZodError) {
       logger.error("Validation error", { tool: name, issues: err.issues });
       return fail(`Validation error: ${err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    }
+    if (config.rbacEnabled && userContext) {
+      entitlementService.recordError(userContext.userId, `tool:${name}`, (err as Error).message);
     }
     logger.error("Tool execution error", { tool: name, error: (err as Error).message });
     return fail((err as Error).message);

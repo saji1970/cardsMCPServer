@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./rbac";
+
 // ── Card product catalog (for agents: compare products, features, checkout fit) ─
 
 export const CardFeatureCategorySchema = z.enum([

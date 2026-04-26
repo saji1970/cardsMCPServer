@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createCardsMcpServer } from "../mcp/cards-mcp-server";
+import { entitlementService } from "../services/entitlement.service";
 import { logger } from "../utils/logger";
 
 const transports: Record<string, StreamableHTTPServerTransport> = {};
@@ -71,7 +72,9 @@ export function mountStreamableMcpHttp(app: Express): void {
             logger.info("MCP Streamable HTTP session closed", { sessionId: sid });
           }
         };
-        const server = createCardsMcpServer();
+        const xUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"] : undefined;
+        const userContext = xUserId ? entitlementService.resolveContext(xUserId) : undefined;
+        const server = createCardsMcpServer(userContext);
         await server.connect(transport);
       } else {
         res.status(400).json({
