@@ -314,6 +314,25 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
   const [simMode, setSimMode] = useState<boolean | "">("");
   const [adminMsg, setAdminMsg] = useState<string | null>(null);
 
+  const [bankList, setBankList] = useState<Array<{
+    bankId: string;
+    displayName: string;
+    cardApiBaseUrl?: string;
+    rewardsApiBaseUrl?: string;
+    promoApiBaseUrl?: string;
+    authToken?: string;
+    active: boolean;
+  }>>([]);
+  const [bankForm, setBankForm] = useState({
+    bankId: "",
+    displayName: "",
+    cardApiBaseUrl: "",
+    rewardsApiBaseUrl: "",
+    promoApiBaseUrl: "",
+    authToken: "",
+  });
+  const [pingBankId, setPingBankId] = useState("");
+
   const [rawOpenapi, setRawOpenapi] = useState("");
   const [openapiFilename, setOpenapiFilename] = useState("uploaded.json");
   const [openapiMsg, setOpenapiMsg] = useState<string | null>(null);
@@ -422,6 +441,16 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
   useEffect(() => {
     if (tab === "users" && isAdmin) void loadUsers();
   }, [tab, isAdmin, loadUsers]);
+
+  const loadBanks = useCallback(async () => {
+    const r = await fetch("/api/admin/banks", { headers: authHeaders() });
+    const d = await r.json();
+    if (d.success) setBankList(d.banks);
+  }, []);
+
+  useEffect(() => {
+    if (tab === "admin" && isAdmin) void loadBanks();
+  }, [tab, isAdmin, loadBanks]);
 
   const createAdminUser = async () => {
     setAddUserErr(null);
@@ -767,13 +796,50 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
 
   const pingBank = async (which: "card" | "rewards" | "promo") => {
     setAdminMsg(null);
+    const body: Record<string, unknown> = { which };
+    if (pingBankId.trim()) body.bankId = pingBankId.trim();
     const r = await fetch("/api/admin/bank/ping", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ which }),
+      body: JSON.stringify(body),
     });
     const j = await r.json();
     setAdminMsg(JSON.stringify(j, null, 2));
+  };
+
+  const saveBank = async () => {
+    setAdminMsg(null);
+    if (!bankForm.bankId.trim() || !bankForm.displayName.trim()) {
+      setAdminMsg("bankId and displayName are required for a new bank");
+      return;
+    }
+    const r = await fetch("/api/admin/banks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        bankId: bankForm.bankId,
+        displayName: bankForm.displayName,
+        cardApiBaseUrl: bankForm.cardApiBaseUrl || undefined,
+        rewardsApiBaseUrl: bankForm.rewardsApiBaseUrl || undefined,
+        promoApiBaseUrl: bankForm.promoApiBaseUrl || undefined,
+        authToken: bankForm.authToken || undefined,
+      }),
+    });
+    const j = await r.json();
+    if (j.success) {
+      setAdminMsg(`Registered bank ${j.bank?.bankId ?? ""}`);
+      setBankForm({ bankId: "", displayName: "", cardApiBaseUrl: "", rewardsApiBaseUrl: "", promoApiBaseUrl: "", authToken: "" });
+      void loadBanks();
+    } else setAdminMsg(j.error || "Failed");
+  };
+
+  const removeBank = async (id: string) => {
+    if (!window.confirm(`Remove bank ${id}?`)) return;
+    setAdminMsg(null);
+    const r = await fetch(`/api/admin/banks/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
+    const j = await r.json();
+    if (j.success) { setAdminMsg(`Deleted ${id}`); void loadBanks(); }
+    else setAdminMsg(j.error || "Delete failed");
   };
 
   const uploadOpenapiFile = async (file: File | null) => {
@@ -1319,8 +1385,60 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
         <div className="panel">
           <h2>Bank API endpoints (runtime overrides)</h2>
           <p className="sub" style={{ marginTop: 0 }}>
-            Values override process env until reset. Set <code>ADMIN_API_TOKEN</code> on the server to require Bearer auth.
+            <strong>Default (single) gateway</strong> — values here override process env until reset. For <strong>multiple issuers</strong>, add each bank below; outbound calls can target a bank by id (ping) and catalog products use <code>bankId</code>.
+            Set <code>ADMIN_API_TOKEN</code> on the server to require Bearer auth.
           </p>
+          <h3>Connected banks (issuers)</h3>
+          <p className="sub" style={{ marginTop: 0 }}>
+            Each row is a separate set of card / rewards / promo base URLs. Use <code>GET /api/banks</code> for a public list. Products posted to <code>/api/bank/v1/products?bankId=&lt;id&gt;</code> must use a registered <code>bankId</code> (not <code>_platform</code>).
+          </p>
+          {bankList.length > 0 && (
+            <table className="bank-table" style={{ width: "100%", fontSize: "0.85rem", marginBottom: "1rem", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", padding: "0.25rem" }}>bankId</th>
+                  <th style={{ textAlign: "left", padding: "0.25rem" }}>name</th>
+                  <th style={{ textAlign: "left", padding: "0.25rem" }}>URLs</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {bankList.map((b) => (
+                  <tr key={b.bankId}>
+                    <td style={{ padding: "0.25rem" }}><code>{b.bankId}</code></td>
+                    <td style={{ padding: "0.25rem" }}>{b.displayName}</td>
+                    <td style={{ padding: "0.25rem" }} className="meta">
+                      {b.cardApiBaseUrl ? "card " : ""}
+                      {b.rewardsApiBaseUrl ? "rewards " : ""}
+                      {b.promoApiBaseUrl ? "promo " : ""}
+                      {b.authToken ? "auth" : ""}
+                    </td>
+                    <td style={{ padding: "0.25rem" }}>
+                      <button type="button" className="secondary" style={{ fontSize: "0.75rem" }} onClick={() => void removeBank(b.bankId)}>Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <label>New bankId (slug, e.g. acme-bank)</label>
+          <input value={bankForm.bankId} onChange={(e) => setBankForm({ ...bankForm, bankId: e.target.value })} placeholder="acme-bank" />
+          <label>Display name</label>
+          <input value={bankForm.displayName} onChange={(e) => setBankForm({ ...bankForm, displayName: e.target.value })} />
+          <label>Card API base URL</label>
+          <input value={bankForm.cardApiBaseUrl} onChange={(e) => setBankForm({ ...bankForm, cardApiBaseUrl: e.target.value })} />
+          <label>Rewards API base URL</label>
+          <input value={bankForm.rewardsApiBaseUrl} onChange={(e) => setBankForm({ ...bankForm, rewardsApiBaseUrl: e.target.value })} />
+          <label>Promo API base URL</label>
+          <input value={bankForm.promoApiBaseUrl} onChange={(e) => setBankForm({ ...bankForm, promoApiBaseUrl: e.target.value })} />
+          <label>Bearer token (optional, for that bank’s APIs)</label>
+          <input type="password" value={bankForm.authToken} onChange={(e) => setBankForm({ ...bankForm, authToken: e.target.value })} autoComplete="off" />
+          <div className="row" style={{ marginTop: "0.5rem" }}>
+            <button type="button" className="primary" onClick={() => void saveBank()}>Add bank</button>
+            <button type="button" className="secondary" onClick={() => void loadBanks()}>Refresh list</button>
+          </div>
+
+          <h3>Default override (all traffic without a bank id)</h3>
           <label htmlFor="adm">Admin Bearer token (browser only)</label>
           <input id="adm" type="password" autoComplete="off" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} placeholder="Matches server ADMIN_API_TOKEN" />
           <div className="row">
@@ -1340,6 +1458,8 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
             <option value="true">true (mock data)</option>
             <option value="false">false (call real APIs)</option>
           </select>
+          <label>Optional: ping a specific <code>bankId</code> (leave empty for default URLs above)</label>
+          <input value={pingBankId} onChange={(e) => setPingBankId(e.target.value)} placeholder="e.g. acme-bank" />
           <div className="row" style={{ marginTop: "0.75rem" }}>
             <button type="button" className="primary" onClick={() => void saveAdmin()}>Save overrides</button>
             <button type="button" className="secondary" onClick={() => void resetAdmin()}>Reset overrides</button>

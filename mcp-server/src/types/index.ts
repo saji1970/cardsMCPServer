@@ -96,6 +96,8 @@ export const CardProductSchema = z.object({
   annualFeeUsd: z.number().optional(),
   marketingSummary: z.string(),
   features: z.array(CardFeatureSchema),
+  /** When set, ties this product to a registered bank (see /api/banks). Demo seed uses _platform. */
+  bankId: z.string().optional(),
   /** Categories where this product is typically strongest vs peers. */
   strongCategories: z.array(z.string()),
   rewardRates: z.array(RewardRateEntrySchema).optional(),

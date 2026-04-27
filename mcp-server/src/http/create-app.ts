@@ -7,9 +7,13 @@ import axios from "axios";
 import { config } from "../config/env";
 import {
   getEffectiveAuthToken,
+  getEffectiveAuthTokenForBank,
   getEffectiveCardApiBaseUrl,
+  getEffectiveCardApiBaseUrlForBank,
   getEffectivePromoApiBaseUrl,
+  getEffectivePromoApiBaseUrlForBank,
   getEffectiveRewardsApiBaseUrl,
+  getEffectiveRewardsApiBaseUrlForBank,
   getEffectiveSimulationMode,
 } from "../config/effective-config";
 import {
@@ -53,6 +57,7 @@ import { promoService } from "../services/promo.service";
 import { logger } from "../utils/logger";
 import { mountStreamableMcpHttp } from "./mcp-streamable-http";
 import { buildJobStore } from "../jobs/build-job-store";
+import { bankRegistry } from "../data/bank-registry";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads", "openapi");
 
@@ -123,9 +128,12 @@ function buildMcpConfigPayload(req: Request): Record<string, unknown> {
     registrationEndpoint: `${baseUrl}/api/keys/register`,
     toolsetsEndpoint: `${baseUrl}/api/toolsets`,
     bankCatalog: {
-      list: `${baseUrl}/api/bank/v1/catalog`,
+      list: `${baseUrl}/api/bank/v1/catalog?bankId=<bankId>`,
+      listAll: `${baseUrl}/api/bank/v1/catalog (omit bankId to include every issuer)`,
+      banks: `${baseUrl}/api/banks (registered issuers)`,
+      adminBanks: `${baseUrl}/api/admin/banks (create or update an issuer connection; admin only)`,
       product: `${baseUrl}/api/bank/v1/products/:productId`,
-      createProduct: `POST ${baseUrl}/api/bank/v1/products (subscription API key or admin)`,
+      createProduct: `POST ${baseUrl}/api/bank/v1/products?bankId=<id> (body + optional bankId query)`,
     },
     buildJobs: {
       storageDir: buildJobStore.jobsDir(),
@@ -368,8 +376,11 @@ export function createHttpApp(): express.Express {
     res.json({ success: true, count: entries.length, entries });
   });
 
-  app.get("/api/catalog/products", (_req, res) => {
-    const products = listCardProducts();
+  app.get("/api/catalog/products", (req, res) => {
+    const filter: { issuer?: string; bankId?: string } = {};
+    if (typeof req.query.issuer === "string" && req.query.issuer.trim()) filter.issuer = req.query.issuer;
+    if (typeof req.query.bankId === "string" && req.query.bankId.trim()) filter.bankId = req.query.bankId;
+    const products = listCardProducts(Object.keys(filter).length ? filter : undefined);
     res.json({ success: true, count: products.length, products });
   });
 
@@ -474,12 +485,78 @@ export function createHttpApp(): express.Express {
     }
   });
 
+  // ── Registered issuers (multiple bank API connections) ─────────────────
+
+  app.get("/api/banks", (_req, res) => {
+    res.json({ success: true, count: bankRegistry.listPublic().length, banks: bankRegistry.listPublic() });
+  });
+
+  app.get("/api/admin/banks", requireAdmin, (_req, res) => {
+    res.json({
+      success: true,
+      banks: bankRegistry.list().map((b) => ({ ...b, authToken: b.authToken ? "[set]" : undefined })),
+    });
+  });
+
+  app.post("/api/admin/banks", requireAdmin, (req, res) => {
+    try {
+      const b = bankRegistry.create(
+        req.body as {
+          bankId: string;
+          displayName: string;
+          cardApiBaseUrl?: string;
+          rewardsApiBaseUrl?: string;
+          promoApiBaseUrl?: string;
+          authToken?: string;
+        },
+      );
+      clearHttpClientCache();
+      res.status(201).json({ success: true, bank: { ...b, authToken: b.authToken ? "[set]" : undefined } });
+    } catch (e) {
+      res.status(400).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/admin/banks/:bankId", requireAdmin, (req, res) => {
+    try {
+      const id = String(req.params.bankId);
+      const b = bankRegistry.update(id, {
+        displayName: typeof (req.body as { displayName?: string }).displayName === "string" ? (req.body as { displayName: string }).displayName : undefined,
+        cardApiBaseUrl: typeof (req.body as { cardApiBaseUrl?: string }).cardApiBaseUrl === "string" ? (req.body as { cardApiBaseUrl: string }).cardApiBaseUrl : undefined,
+        rewardsApiBaseUrl:
+          typeof (req.body as { rewardsApiBaseUrl?: string }).rewardsApiBaseUrl === "string"
+            ? (req.body as { rewardsApiBaseUrl: string }).rewardsApiBaseUrl
+            : undefined,
+        promoApiBaseUrl:
+          typeof (req.body as { promoApiBaseUrl?: string }).promoApiBaseUrl === "string" ? (req.body as { promoApiBaseUrl: string }).promoApiBaseUrl : undefined,
+        authToken: typeof (req.body as { authToken?: string }).authToken === "string" ? (req.body as { authToken: string }).authToken : undefined,
+        active: typeof (req.body as { active?: boolean }).active === "boolean" ? (req.body as { active: boolean }).active : undefined,
+      });
+      clearHttpClientCache();
+      res.json({ success: true, bank: { ...b, authToken: b.authToken ? "[set]" : undefined } });
+    } catch (e) {
+      res.status(400).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.delete("/api/admin/banks/:bankId", requireAdmin, (req, res) => {
+    const id = String(req.params.bankId);
+    if (!bankRegistry.delete(id)) {
+      res.status(404).json({ success: false, error: "Bank not found" });
+      return;
+    }
+    clearHttpClientCache();
+    res.json({ success: true, deleted: true, bankId: id });
+  });
+
   // ── Bank catalog API (issuer / partner integration) ───────────────────────
   // Same product model as /api/catalog: reward rate tables, signup bonus, eligibility, APR, fees, benefits.
 
   app.get("/api/bank/v1/catalog", (req, res) => {
-    const issuer = typeof req.query.issuer === "string" ? req.query.issuer : undefined;
-    const products = listCardProducts(issuer ? { issuer } : undefined);
+    const filter: { issuer?: string; bankId?: string } = {};
+    if (typeof req.query.issuer === "string" && req.query.issuer.trim()) filter.issuer = req.query.issuer;
+    if (typeof req.query.bankId === "string" && req.query.bankId.trim()) filter.bankId = req.query.bankId;
+    const products = listCardProducts(Object.keys(filter).length ? filter : undefined);
     res.json({ success: true, api: "bank.v1", count: products.length, products });
   });
 
@@ -491,7 +568,9 @@ export function createHttpApp(): express.Express {
 
   app.post("/api/bank/v1/products", requireApiKeyOrAdmin, (req, res) => {
     try {
-      const product = CardProductSchema.parse(req.body);
+      const q = typeof req.query.bankId === "string" ? req.query.bankId.trim() : undefined;
+      const body = { ...(req.body as object), ...(q ? { bankId: q } : {}) };
+      const product = CardProductSchema.parse(body);
       const created = createCardProduct(product);
       res.status(201).json({ success: true, api: "bank.v1", product: created });
     } catch (e) {
@@ -758,6 +837,8 @@ export function createHttpApp(): express.Express {
       effectiveSimulationMode: getEffectiveSimulationMode(),
       openApiPathsLoaded: collectAllOpenApiSpecPaths(),
       adminTokenConfigured: !!process.env.ADMIN_API_TOKEN?.trim(),
+      registeredBanks: bankRegistry.listPublic(),
+      registeredBanksFullCount: bankRegistry.list().length,
     });
   });
 
@@ -789,13 +870,14 @@ export function createHttpApp(): express.Express {
 
   app.post("/api/admin/bank/ping", requireAdmin, async (req, res) => {
     const which = (req.body as { which?: string })?.which ?? "card";
+    const bankId = typeof (req.body as { bankId?: string }).bankId === "string" ? (req.body as { bankId: string }).bankId.trim() : undefined;
     const url =
       which === "rewards"
-        ? getEffectiveRewardsApiBaseUrl()
+        ? getEffectiveRewardsApiBaseUrlForBank(bankId)
         : which === "promo"
-          ? getEffectivePromoApiBaseUrl()
-          : getEffectiveCardApiBaseUrl();
-    const token = getEffectiveAuthToken();
+          ? getEffectivePromoApiBaseUrlForBank(bankId)
+          : getEffectiveCardApiBaseUrlForBank(bankId);
+    const token = getEffectiveAuthTokenForBank(bankId);
     try {
       const r = await axios.get(url.replace(/\/$/, "") + "/", {
         timeout: 4000,
@@ -805,6 +887,7 @@ export function createHttpApp(): express.Express {
       res.json({
         success: true,
         which,
+        bankId: bankId ?? null,
         url,
         status: r.status,
         reachable: r.status < 500,
@@ -813,6 +896,7 @@ export function createHttpApp(): express.Express {
       res.json({
         success: false,
         which,
+        bankId: bankId ?? null,
         url,
         reachable: false,
         error: (e as Error).message,

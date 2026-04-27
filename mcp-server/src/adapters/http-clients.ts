@@ -1,51 +1,54 @@
 import axios, { AxiosInstance } from "axios";
 import {
-  getEffectiveAuthToken,
-  getEffectiveCardApiBaseUrl,
-  getEffectivePromoApiBaseUrl,
-  getEffectiveRewardsApiBaseUrl,
+  getEffectiveAuthTokenForBank,
+  getEffectiveCardApiBaseUrlForBank,
+  getEffectivePromoApiBaseUrlForBank,
+  getEffectiveRewardsApiBaseUrlForBank,
 } from "../config/effective-config";
 
 type Kind = "card" | "rewards" | "promo";
 
-const store = new Map<Kind, { sig: string; client: AxiosInstance }>();
+const store = new Map<string, { sig: string; client: AxiosInstance }>();
 
-function baseUrlFor(kind: Kind): string {
+function baseUrlFor(kind: Kind, bankId?: string): string {
   switch (kind) {
     case "card":
-      return getEffectiveCardApiBaseUrl();
+      return getEffectiveCardApiBaseUrlForBank(bankId);
     case "rewards":
-      return getEffectiveRewardsApiBaseUrl();
+      return getEffectiveRewardsApiBaseUrlForBank(bankId);
     case "promo":
-      return getEffectivePromoApiBaseUrl();
+      return getEffectivePromoApiBaseUrlForBank(bankId);
   }
 }
 
-function getClient(kind: Kind): AxiosInstance {
-  const baseURL = baseUrlFor(kind);
-  const token = getEffectiveAuthToken();
-  const sig = `${baseURL}|${token}`;
-  const prev = store.get(kind);
+function getClient(kind: Kind, bankId?: string): AxiosInstance {
+  const b = bankId?.trim() || "";
+  const baseURL = baseUrlFor(kind, bankId);
+  const token = getEffectiveAuthTokenForBank(bankId);
+  const sig = `${kind}|${b}|${baseURL}|${token}`;
+  const key = `${kind}|${b}`;
+  const prev = store.get(key);
   if (prev?.sig === sig) return prev.client;
   const client = axios.create({
     baseURL,
     timeout: 5000,
     headers: { Authorization: `Bearer ${token}` },
   });
-  store.set(kind, { sig, client });
+  store.set(key, { sig, client });
   return client;
 }
 
-export function getCardHttpClient(): AxiosInstance {
-  return getClient("card");
+/** Outbound card API—optionally for a registered bank (see /api/banks). */
+export function getCardHttpClient(bankId?: string): AxiosInstance {
+  return getClient("card", bankId);
 }
 
-export function getRewardsHttpClient(): AxiosInstance {
-  return getClient("rewards");
+export function getRewardsHttpClient(bankId?: string): AxiosInstance {
+  return getClient("rewards", bankId);
 }
 
-export function getPromoHttpClient(): AxiosInstance {
-  return getClient("promo");
+export function getPromoHttpClient(bankId?: string): AxiosInstance {
+  return getClient("promo", bankId);
 }
 
 export function clearHttpClientCache(): void {

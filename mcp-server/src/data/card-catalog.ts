@@ -1,8 +1,10 @@
 import type { Card, CardFeature, CardProduct } from "../types";
+import { bankRegistry } from "./bank-registry";
 
 /** Seed data: card products loaded at startup. */
 const SEED_PRODUCTS: CardProduct[] = [
   {
+    bankId: "_platform",
     productId: "prod-chase-sapphire-reserve",
     displayName: "Chase Sapphire Reserve",
     issuer: "Chase",
@@ -82,6 +84,7 @@ const SEED_PRODUCTS: CardProduct[] = [
     ],
   },
   {
+    bankId: "_platform",
     productId: "prod-amex-gold",
     displayName: "American Express Gold Card",
     issuer: "American Express",
@@ -149,6 +152,7 @@ const SEED_PRODUCTS: CardProduct[] = [
     ],
   },
   {
+    bankId: "_platform",
     productId: "prod-citi-double-cash",
     displayName: "Citi Double Cash Card",
     issuer: "Citi",
@@ -199,6 +203,7 @@ const SEED_PRODUCTS: CardProduct[] = [
     benefits: [],
   },
   {
+    bankId: "_platform",
     productId: "prod-capital-venture-x",
     displayName: "Capital One Venture X",
     issuer: "Capital One",
@@ -284,16 +289,33 @@ export function getCardProductById(productId: string): CardProduct | undefined {
   return catalog.get(productId);
 }
 
-export function listCardProducts(filter?: { issuer?: string }): CardProduct[] {
+function normalizeBankId(p: CardProduct): string {
+  return p.bankId?.trim() || "_platform";
+}
+
+export function listCardProducts(filter?: { issuer?: string; bankId?: string }): CardProduct[] {
   const all = [...catalog.values()];
-  if (!filter?.issuer?.trim()) return all;
-  const q = filter.issuer.toLowerCase();
-  return all.filter((p) => p.issuer.toLowerCase().includes(q));
+  let rows = all;
+  if (filter?.bankId?.trim()) {
+    const bid = filter.bankId.trim();
+    rows = rows.filter((p) => normalizeBankId(p) === bid);
+  }
+  if (filter?.issuer?.trim()) {
+    const q = filter.issuer.toLowerCase();
+    rows = rows.filter((p) => p.issuer.toLowerCase().includes(q));
+  }
+  return rows;
 }
 
 export function createCardProduct(product: CardProduct): CardProduct {
   if (catalog.has(product.productId)) {
     throw new Error(`Product ${product.productId} already exists`);
+  }
+  if (product.bankId?.trim()) {
+    const b = product.bankId.trim();
+    if (b !== "_platform" && !bankRegistry.get(b)) {
+      throw new Error(`Unknown bankId "${b}". Add the bank in /api/banks first.`);
+    }
   }
   catalog.set(product.productId, product);
   return product;
@@ -302,6 +324,12 @@ export function createCardProduct(product: CardProduct): CardProduct {
 export function updateCardProduct(productId: string, updates: Partial<CardProduct>): CardProduct {
   const existing = catalog.get(productId);
   if (!existing) throw new Error(`Product ${productId} not found`);
+  if (updates.bankId?.trim()) {
+    const b = updates.bankId.trim();
+    if (b !== "_platform" && !bankRegistry.get(b)) {
+      throw new Error(`Unknown bankId "${b}". Add the bank in /api/banks first.`);
+    }
+  }
   const updated = { ...existing, ...updates, productId }; // productId is immutable
   catalog.set(productId, updated);
   return updated;
