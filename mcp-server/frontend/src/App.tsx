@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 
-type Tab = "marketplace" | "cards" | "admin" | "openapi" | "sandbox" | "users" | "audit";
+type Tab = "marketplace" | "cards" | "admin" | "openapi" | "sandbox" | "users" | "audit" | "agentdev";
 type MpView = "browse" | "detail" | "publisher" | "installed";
 
 type CardRow = {
@@ -361,6 +361,16 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
   const [auditFilterAction, setAuditFilterAction] = useState("");
   const [auditLimit, setAuditLimit] = useState("100");
 
+  const AGENT_KEY = "cards-mcp-agent-api-key";
+  const [mcpConfigText, setMcpConfigText] = useState<string>("");
+  const [toolsetRows, setToolsetRows] = useState<Array<{ toolsetId: string; name: string; description: string; tools: string[]; requiredTier: string }>>([]);
+  const [agentApiKey, setAgentApiKey] = useState(() => localStorage.getItem(AGENT_KEY) ?? "");
+  const [regAgent, setRegAgent] = useState({ agentName: "", contactEmail: "", out: null as null | { apiKey: string; tier: string } });
+  const [jobForm, setJobForm] = useState({ name: "catalog-sync", kind: "bank-ingest", totalSteps: "10" });
+  const [jobId, setJobId] = useState("");
+  const [jobsOut, setJobsOut] = useState<string | null>(null);
+  const [agentDevMsg, setAgentDevMsg] = useState<string | null>(null);
+
   const MP_PUBLISHER_ID = "pub-demo";
   const MP_PUBLISHER_NAME = "Demo Publisher";
 
@@ -472,9 +482,107 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
     if (d.success) setAuditEntries(d.entries);
   }, [auditFilterUser, auditFilterAction, auditLimit]);
 
+  const persistAgentKey = () => {
+    const k = agentApiKey.trim();
+    if (k) localStorage.setItem(AGENT_KEY, k);
+    else localStorage.removeItem(AGENT_KEY);
+    setAgentDevMsg(k ? "Agent API key saved in this browser." : "Cleared agent API key.");
+  };
+
+  const agentKeyHeaders = (): HeadersInit => {
+    const k = agentApiKey.trim();
+    if (!k) return {};
+    return { "X-API-Key": k };
+  };
+
+  const loadAgentDev = useCallback(async () => {
+    setAgentDevMsg(null);
+    try {
+      const [mcp, ts] = await Promise.all([
+        fetch("/mcp-config").then((r) => r.json()),
+        fetch("/api/toolsets").then((r) => r.json()),
+      ]);
+      setMcpConfigText(JSON.stringify(mcp, null, 2));
+      if (ts.success && Array.isArray(ts.toolsets)) setToolsetRows(ts.toolsets);
+    } catch (e) {
+      setAgentDevMsg((e as Error).message);
+    }
+  }, []);
+
+  const registerAgent = async () => {
+    setAgentDevMsg(null);
+    setRegAgent((r) => ({ ...r, out: null }));
+    if (!regAgent.agentName || !regAgent.contactEmail) {
+      setAgentDevMsg("agentName and contactEmail are required");
+      return;
+    }
+    const r = await fetch("/api/keys/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentName: regAgent.agentName, contactEmail: regAgent.contactEmail }),
+    });
+    const d = await r.json();
+    if (d.success && d.apiKey) {
+      setRegAgent((x) => ({ ...x, out: { apiKey: d.apiKey, tier: d.tier } }));
+      setAgentApiKey(d.apiKey);
+      localStorage.setItem(AGENT_KEY, d.apiKey);
+      setAgentDevMsg("Key created — stored locally for job/MCP tests.");
+    } else setAgentDevMsg(d.error || "Registration failed");
+  };
+
+  const loadJobs = async () => {
+    setJobsOut(null);
+    setAgentDevMsg(null);
+    if (!agentApiKey.trim() && !localStorage.getItem(ADMIN_KEY)?.trim()) {
+      setAgentDevMsg("Set an agent API key (or admin token) to list jobs.");
+      return;
+    }
+    const r = await fetch("/api/jobs", { headers: { ...authHeaders(), ...agentKeyHeaders() } });
+    const d = await r.json();
+    if (d.success) setJobsOut(JSON.stringify(d.jobs, null, 2));
+    else setAgentDevMsg(d.error || "Failed to load jobs");
+  };
+
+  const createJob = async () => {
+    setAgentDevMsg(null);
+    if (!agentApiKey.trim() && !localStorage.getItem(ADMIN_KEY)?.trim()) {
+      setAgentDevMsg("Set an agent API key or admin token to create a job.");
+      return;
+    }
+    const r = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...agentKeyHeaders() },
+      body: JSON.stringify({
+        name: jobForm.name,
+        kind: jobForm.kind,
+        totalSteps: parseInt(jobForm.totalSteps, 10) || 1,
+        checkpoint: { tab: 0, note: "example checkpoint — persists across restarts" },
+      }),
+    });
+    const d = await r.json();
+    if (d.success && d.job?.id) {
+      setJobId(d.job.id);
+      setAgentDevMsg("Job created.");
+      void loadJobs();
+    } else setAgentDevMsg(d.error || "Create failed");
+  };
+
+  const tickJob = async () => {
+    if (!jobId.trim()) { setAgentDevMsg("Set job id (create a job first)"); return; }
+    setAgentDevMsg(null);
+    const r = await fetch(`/api/jobs/${encodeURIComponent(jobId.trim())}/tick`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...agentKeyHeaders() },
+      body: JSON.stringify({ mergeCheckpoint: { lastTick: new Date().toISOString() } }),
+    });
+    const d = await r.json();
+    if (d.success) { setAgentDevMsg("Tick ok"); void loadJobs(); }
+    else setAgentDevMsg(d.error || "Tick failed");
+  };
+
   useEffect(() => {
-    if (tab === "audit" && isAdmin) void loadAudit();
-  }, [tab, isAdmin, loadAudit]);
+    if (tab === "agentdev") void loadAgentDev();
+  }, [tab, loadAgentDev]);
 
   // ── Marketplace data loading ─────────────────────────────────────────────
   const loadMpAgents = useCallback(async () => {
@@ -727,6 +835,7 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
 
   const allTabs: Array<[Tab, string]> = [
     ["marketplace", "Marketplace"],
+    ["agentdev", "Agent API"],
     ...(isAdmin ? [
       ["cards", "Cards & features"],
       ["admin", "Bank APIs"],
@@ -1067,6 +1176,94 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
           </button>
         ))}
       </div>
+
+      {tab === "agentdev" && (
+        <div className="panel">
+          <h2>Agent API &amp; MCP (toolsets 1 &amp; 2, bank catalog, checkpoints)</h2>
+          <p className="sub" style={{ marginTop: 0 }}>
+            Register a subscription API key, copy the <code>/mcp-config</code> JSON for Cursor or Claude, narrow tools with{" "}
+            <code>X-Toolset-Id: 1</code> or <code>2</code>, and run durable build jobs that resume after restart.
+          </p>
+
+          <h3>1. Register API key (subscription)</h3>
+          <label>Agent name</label>
+          <input value={regAgent.agentName} onChange={(e) => setRegAgent({ ...regAgent, agentName: e.target.value })} placeholder="my-shopping-bot" />
+          <label>Contact email</label>
+          <input type="email" value={regAgent.contactEmail} onChange={(e) => setRegAgent({ ...regAgent, contactEmail: e.target.value })} placeholder="dev@example.com" />
+          <div className="row">
+            <button type="button" className="primary" onClick={() => void registerAgent()}>Register &amp; save key</button>
+          </div>
+          {regAgent.out && (
+            <p className="ok">
+              API key (copy once): <code className="temp-pw">{regAgent.out.apiKey}</code>{" "}
+              <button type="button" className="secondary" style={{ marginLeft: "0.35rem", padding: "0.2rem 0.5rem", fontSize: "0.78rem" }}
+                onClick={() => { void navigator.clipboard.writeText(regAgent.out!.apiKey); }}>
+                Copy
+              </button>
+              <span className="meta" style={{ marginLeft: "0.5rem" }}>Tier: {regAgent.out.tier} (ask admin to raise to pro for toolset 2)</span>
+            </p>
+          )}
+
+          <h3>2. Saved agent key (for /api/jobs and MCP)</h3>
+          <label htmlFor="agk">X-API-Key (cmcp_sk_…)</label>
+          <input id="agk" type="password" autoComplete="off" value={agentApiKey} onChange={(e) => setAgentApiKey(e.target.value)} placeholder="Paste key or register above" />
+          <div className="row">
+            <button type="button" className="secondary" onClick={persistAgentKey}>Save in browser</button>
+            <button type="button" className="secondary" onClick={() => void loadAgentDev()}>Refresh /mcp-config</button>
+          </div>
+
+          <h3>3. MCP config (copy into Cursor / Claude)</h3>
+          <p className="sub">Source: <code>GET /mcp-config</code> (alias <code>/api/mcp-config</code>)</p>
+          <textarea value={mcpConfigText} readOnly rows={16} spellCheck={false} style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.8rem" }} />
+          <div className="row">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => { void navigator.clipboard.writeText(mcpConfigText); setAgentDevMsg("Copied JSON to clipboard."); }}
+            >
+              Copy JSON
+            </button>
+          </div>
+
+          <h3>4. Toolsets (including 1 and 2)</h3>
+          <div className="grid" style={{ marginTop: "0.5rem" }}>
+            {toolsetRows
+              .filter((t) => t.toolsetId === "1" || t.toolsetId === "2" || t.toolsetId === "card-discovery" || t.toolsetId === "card-catalog-management")
+              .map((t) => (
+                <div key={t.toolsetId} className="card-tile">
+                  <h3>{t.name}</h3>
+                  <div className="meta">id: <code>{t.toolsetId}</code> &middot; tier: {t.requiredTier}</div>
+                  <p style={{ fontSize: "0.85rem" }}>{t.description}</p>
+                  <p className="meta" style={{ marginTop: "0.35rem" }}>{(t.tools ?? []).join(", ")}</p>
+                </div>
+              ))}
+          </div>
+          {toolsetRows.length === 0 && <p className="sub">Load toolsets via Refresh or open <code>/api/toolsets</code></p>}
+
+          <h3>5. Bank catalog HTTP (<code>api: bank.v1</code>)</h3>
+          <p className="sub">Issuers push card products (reward rates, bonus, eligibility, APR, etc.) with the same key. List: <code>GET /api/bank/v1/catalog</code></p>
+
+          <h3>6. Checkpoint build jobs (resume after limit / restart)</h3>
+          <p className="sub">State is stored on disk; each <code>POST /api/jobs/:id/tick</code> advances one step. Use your agent key or admin token.</p>
+          <label>Job name</label>
+          <input value={jobForm.name} onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })} />
+          <label>Kind</label>
+          <input value={jobForm.kind} onChange={(e) => setJobForm({ ...jobForm, kind: e.target.value })} />
+          <label>Total steps</label>
+          <input value={jobForm.totalSteps} onChange={(e) => setJobForm({ ...jobForm, totalSteps: e.target.value })} />
+          <div className="row">
+            <button type="button" className="primary" onClick={() => void createJob()}>Create job</button>
+            <button type="button" className="secondary" onClick={() => void loadJobs()}>List jobs</button>
+          </div>
+          <label>Current job id (from create)</label>
+          <input value={jobId} onChange={(e) => setJobId(e.target.value)} placeholder="job_…" />
+          <div className="row">
+            <button type="button" className="primary" onClick={() => void tickJob()}>Tick (one step)</button>
+          </div>
+          {jobsOut && <pre className="out" style={{ marginTop: "0.5rem" }}>{jobsOut}</pre>}
+          {agentDevMsg && <p className="ok" style={{ marginTop: "0.5rem" }}>{agentDevMsg}</p>}
+        </div>
+      )}
 
       {tab === "marketplace" && (
         <div className="panel">

@@ -4,6 +4,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createCardsMcpServer } from "../mcp/cards-mcp-server";
 import { entitlementService } from "../services/entitlement.service";
+import { optionalApiKeyForMcp } from "./api-key-middleware";
+import { toolsetRegistry } from "../data/toolset-registry";
 import { logger } from "../utils/logger";
 
 const transports: Record<string, StreamableHTTPServerTransport> = {};
@@ -40,7 +42,7 @@ function optionalMcpBearer(req: Request, res: Response, next: () => void): void 
  * then send further JSON-RPC with header mcp-session-id.
  */
 export function mountStreamableMcpHttp(app: Express): void {
-  app.all("/mcp", optionalMcpBearer, async (req: Request, res: Response) => {
+  app.all("/mcp", optionalApiKeyForMcp, optionalMcpBearer, async (req: Request, res: Response) => {
     try {
       const sessionId = sessionHeader(req);
       let transport: StreamableHTTPServerTransport | undefined;
@@ -74,7 +76,16 @@ export function mountStreamableMcpHttp(app: Express): void {
         };
         const xUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"] : undefined;
         const userContext = xUserId ? entitlementService.resolveContext(xUserId) : undefined;
-        const server = createCardsMcpServer(userContext);
+
+        // API key tier + optional X-Toolset-Id narrows the tool list (e.g. "1" or "2").
+        let allowedTools: Set<string> | undefined;
+        if (req.apiKey) {
+          const toolsetHeader = req.headers["x-toolset-id"];
+          const toolsetId = typeof toolsetHeader === "string" ? toolsetHeader : Array.isArray(toolsetHeader) ? toolsetHeader[0] : undefined;
+          allowedTools = toolsetRegistry.getAllowedToolsForTier(req.apiKey.tier, toolsetId);
+        }
+
+        const server = createCardsMcpServer(userContext, allowedTools);
         await server.connect(transport);
       } else {
         res.status(400).json({

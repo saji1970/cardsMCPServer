@@ -7,6 +7,24 @@ import { featuresRelevantToPurchase, purchaseService } from "../services/purchas
 import { marketplaceService } from "../services/marketplace.service";
 import { entitlementService, EntitlementError } from "../services/entitlement.service";
 import { userStore } from "../data/user-store";
+import { discoveryService } from "../services/discovery.service";
+import {
+  getCardProductById,
+  createCardProduct,
+  updateCardProduct,
+  deleteCardProduct,
+} from "../data/card-catalog";
+import { toolsetRegistry } from "../data/toolset-registry";
+import {
+  CardProductSchema,
+  RewardRateEntrySchema,
+  SignupBonusSchema,
+  EligibilityCriteriaSchema,
+  AprRangesSchema,
+  FeeScheduleSchema,
+  BenefitSummarySchema,
+} from "../types";
+import { SubscriptionTierSchema } from "../types/toolset";
 import { config } from "../config/env";
 import type { UserContext } from "../types/rbac";
 import { RoleSchema } from "../types/rbac";
@@ -368,6 +386,246 @@ export const staticToolDefinitions = [
       required: [],
     },
   },
+  {
+    name: "match_card_products",
+    description:
+      "Rank all card products by estimated net annual value for a given spending profile. Returns products ordered from best to worst fit with detailed reward breakdowns.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        monthlyDining: { type: "number", description: "Monthly dining spend in USD" },
+        monthlyTravel: { type: "number", description: "Monthly travel spend in USD" },
+        monthlyGroceries: { type: "number", description: "Monthly grocery spend in USD" },
+        monthlyGas: { type: "number", description: "Monthly gas spend in USD" },
+        monthlyShopping: { type: "number", description: "Monthly shopping spend in USD" },
+        monthlyOther: { type: "number", description: "Monthly other spend in USD" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "compare_card_products",
+    description:
+      "Side-by-side comparison of 2-3 card products including rewards, fees, benefits, and eligibility. Optionally provide a spending profile for personalized value estimates.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of 2-3 product IDs to compare (e.g. prod-chase-sapphire-reserve)",
+        },
+        monthlyDining: { type: "number", description: "Monthly dining spend in USD" },
+        monthlyTravel: { type: "number", description: "Monthly travel spend in USD" },
+        monthlyGroceries: { type: "number", description: "Monthly grocery spend in USD" },
+        monthlyGas: { type: "number", description: "Monthly gas spend in USD" },
+        monthlyShopping: { type: "number", description: "Monthly shopping spend in USD" },
+        monthlyOther: { type: "number", description: "Monthly other spend in USD" },
+      },
+      required: ["productIds"],
+    },
+  },
+  {
+    name: "estimate_annual_value",
+    description:
+      "Estimate the projected annual value of a single card product for a spending profile: annual rewards minus fees plus benefits value. Optionally include first-year signup bonus.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Card product ID" },
+        includeSignupBonus: { type: "boolean", description: "Include signup bonus in value estimate (default: true)" },
+        monthlyDining: { type: "number", description: "Monthly dining spend in USD" },
+        monthlyTravel: { type: "number", description: "Monthly travel spend in USD" },
+        monthlyGroceries: { type: "number", description: "Monthly grocery spend in USD" },
+        monthlyGas: { type: "number", description: "Monthly gas spend in USD" },
+        monthlyShopping: { type: "number", description: "Monthly shopping spend in USD" },
+        monthlyOther: { type: "number", description: "Monthly other spend in USD" },
+      },
+      required: ["productId"],
+    },
+  },
+  {
+    name: "get_signup_bonuses",
+    description:
+      "List all active sign-up bonus offers across card products with bonus amounts, minimum spend requirements, and estimated cash values.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "check_product_eligibility",
+    description:
+      "Check which card products a user likely qualifies for based on credit score range and optional annual income.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        creditScore: {
+          type: "string",
+          enum: ["poor", "fair", "good", "excellent"],
+          description: "Credit score range",
+        },
+        annualIncome: { type: "number", description: "Annual income in USD (optional)" },
+      },
+      required: ["creditScore"],
+    },
+  },
+  // ── Catalog management tools ──────────────────────────────────────────
+  {
+    name: "create_card_product",
+    description: "Create a new card product in the catalog. Requires all core product fields.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Unique product ID (e.g. prod-bank-card-name)" },
+        displayName: { type: "string", description: "Display name" },
+        issuer: { type: "string", description: "Issuer/bank name" },
+        network: { type: "string", enum: ["visa", "mastercard", "amex", "discover"], description: "Card network" },
+        tier: { type: "string", enum: ["standard", "gold", "platinum", "infinite"], description: "Card tier" },
+        annualFeeUsd: { type: "number", description: "Annual fee in USD" },
+        marketingSummary: { type: "string", description: "Marketing summary text" },
+        strongCategories: { type: "array", items: { type: "string" }, description: "Strong spend categories" },
+        features: { type: "array", items: { type: "object" }, description: "Card features array" },
+      },
+      required: ["productId", "displayName", "issuer", "network", "tier", "marketingSummary", "strongCategories", "features"],
+    },
+  },
+  {
+    name: "update_card_product",
+    description: "Update an existing card product's core fields (displayName, issuer, marketingSummary, etc.).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID to update" },
+        displayName: { type: "string", description: "New display name" },
+        issuer: { type: "string", description: "New issuer name" },
+        network: { type: "string", enum: ["visa", "mastercard", "amex", "discover"], description: "New card network" },
+        tier: { type: "string", enum: ["standard", "gold", "platinum", "infinite"], description: "New card tier" },
+        annualFeeUsd: { type: "number", description: "New annual fee" },
+        marketingSummary: { type: "string", description: "New marketing summary" },
+        strongCategories: { type: "array", items: { type: "string" }, description: "New strong categories" },
+      },
+      required: ["productId"],
+    },
+  },
+  {
+    name: "get_card_product",
+    description: "Get full details for a single card product by ID, including all enriched data.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID to retrieve" },
+      },
+      required: ["productId"],
+    },
+  },
+  {
+    name: "delete_card_product",
+    description: "Delete a card product from the catalog.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID to delete" },
+      },
+      required: ["productId"],
+    },
+  },
+  {
+    name: "update_reward_rates",
+    description: "Replace the reward rates for a card product.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID" },
+        rewardRates: { type: "array", items: { type: "object", properties: { category: { type: "string" }, multiplier: { type: "number" }, description: { type: "string" } }, required: ["category", "multiplier"] }, description: "New reward rates" },
+      },
+      required: ["productId", "rewardRates"],
+    },
+  },
+  {
+    name: "update_signup_bonus",
+    description: "Replace the signup bonus for a card product.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID" },
+        signupBonus: { type: "object", properties: { bonusAmount: { type: "number" }, bonusType: { type: "string" }, minimumSpend: { type: "number" }, timeWindowDays: { type: "number" }, estimatedCashValue: { type: "number" }, description: { type: "string" } }, required: ["bonusAmount", "bonusType", "minimumSpend", "timeWindowDays", "estimatedCashValue", "description"], description: "New signup bonus" },
+      },
+      required: ["productId", "signupBonus"],
+    },
+  },
+  {
+    name: "update_eligibility",
+    description: "Replace the eligibility criteria for a card product.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID" },
+        eligibility: { type: "object", properties: { creditScoreMin: { type: "number" }, creditScoreRange: { type: "string" }, incomeRecommended: { type: "number" }, existingRelationship: { type: "boolean" }, additionalNotes: { type: "string" } }, required: ["creditScoreMin", "creditScoreRange"], description: "New eligibility criteria" },
+      },
+      required: ["productId", "eligibility"],
+    },
+  },
+  {
+    name: "update_apr_ranges",
+    description: "Replace the APR ranges for a card product.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID" },
+        aprRanges: { type: "object", properties: { purchaseAprMin: { type: "number" }, purchaseAprMax: { type: "number" }, balanceTransferApr: { type: "number" }, cashAdvanceApr: { type: "number" }, penaltyApr: { type: "number" }, introApr: { type: "number" } }, required: ["purchaseAprMin", "purchaseAprMax"], description: "New APR ranges" },
+      },
+      required: ["productId", "aprRanges"],
+    },
+  },
+  {
+    name: "update_fees",
+    description: "Replace the fee schedule for a card product.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID" },
+        fees: { type: "object", properties: { annualFeeUsd: { type: "number" }, foreignTransactionFeePercent: { type: "number" }, balanceTransferFeePercent: { type: "number" }, cashAdvanceFeePercent: { type: "number" }, latePaymentFeeUsd: { type: "number" } }, required: ["annualFeeUsd", "foreignTransactionFeePercent"], description: "New fee schedule" },
+      },
+      required: ["productId", "fees"],
+    },
+  },
+  {
+    name: "update_benefits",
+    description: "Replace the benefits list for a card product.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        productId: { type: "string", description: "Product ID" },
+        benefits: { type: "array", items: { type: "object", properties: { benefitId: { type: "string" }, name: { type: "string" }, estimatedAnnualValue: { type: "number" }, description: { type: "string" } }, required: ["benefitId", "name", "description"] }, description: "New benefits list" },
+      },
+      required: ["productId", "benefits"],
+    },
+  },
+  // ── Toolset tools ──────────────────────────────────────────────────────
+  {
+    name: "list_toolsets",
+    description: "List available toolsets that group MCP tools by capability. Optionally filter by subscription tier.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        tier: { type: "string", enum: ["free", "basic", "pro"], description: "Filter toolsets accessible at this tier" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_toolset",
+    description: "Get detailed information about a specific toolset by ID.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        toolsetId: { type: "string", description: "Toolset ID (e.g. card-discovery)" },
+      },
+      required: ["toolsetId"],
+    },
+  },
 ];
 
 /** Built-in tools only; server merges OpenAPI-generated tools at runtime. */
@@ -499,6 +757,83 @@ const GetAuditLogInput = z.object({
   limit: z.number().int().positive().optional(),
 });
 
+const SpendingProfileInput = z.object({
+  monthlyDining: z.number().optional(),
+  monthlyTravel: z.number().optional(),
+  monthlyGroceries: z.number().optional(),
+  monthlyGas: z.number().optional(),
+  monthlyShopping: z.number().optional(),
+  monthlyOther: z.number().optional(),
+});
+
+const MatchCardProductsInput = SpendingProfileInput;
+
+const CompareCardProductsInput = SpendingProfileInput.extend({
+  productIds: z.array(z.string()).min(1).max(4),
+});
+
+const EstimateAnnualValueInput = SpendingProfileInput.extend({
+  productId: z.string(),
+  includeSignupBonus: z.boolean().optional().default(true),
+});
+
+const CheckProductEligibilityInput = z.object({
+  creditScore: z.enum(["poor", "fair", "good", "excellent"]),
+  annualIncome: z.number().optional(),
+});
+
+const CreateCardProductInput = CardProductSchema;
+
+const UpdateCardProductInput = z.object({
+  productId: z.string(),
+  displayName: z.string().optional(),
+  issuer: z.string().optional(),
+  network: z.enum(["visa", "mastercard", "amex", "discover"]).optional(),
+  tier: z.enum(["standard", "gold", "platinum", "infinite"]).optional(),
+  annualFeeUsd: z.number().optional(),
+  marketingSummary: z.string().optional(),
+  strongCategories: z.array(z.string()).optional(),
+});
+
+const GetCardProductInput = z.object({ productId: z.string() });
+const DeleteCardProductInput = z.object({ productId: z.string() });
+
+const UpdateRewardRatesInput = z.object({
+  productId: z.string(),
+  rewardRates: z.array(RewardRateEntrySchema),
+});
+
+const UpdateSignupBonusInput = z.object({
+  productId: z.string(),
+  signupBonus: SignupBonusSchema,
+});
+
+const UpdateEligibilityInput = z.object({
+  productId: z.string(),
+  eligibility: EligibilityCriteriaSchema,
+});
+
+const UpdateAprRangesInput = z.object({
+  productId: z.string(),
+  aprRanges: AprRangesSchema,
+});
+
+const UpdateFeesInput = z.object({
+  productId: z.string(),
+  fees: FeeScheduleSchema,
+});
+
+const UpdateBenefitsInput = z.object({
+  productId: z.string(),
+  benefits: z.array(BenefitSummarySchema),
+});
+
+const ListToolsetsInput = z.object({
+  tier: SubscriptionTierSchema.optional(),
+});
+
+const GetToolsetInput = z.object({ toolsetId: z.string() });
+
 // ── Tool handler dispatch ───────────────────────────────────────────────────
 
 type ToolResult = {
@@ -583,7 +918,8 @@ export async function handleToolCall(
           cardId,
           amount,
           category,
-          card.tier
+          card.tier,
+          card.productId
         );
         return ok({ success: true, rewards: result });
       }
@@ -862,6 +1198,118 @@ export async function handleToolCall(
         const filter = GetAuditLogInput.parse(args);
         const entries = entitlementService.queryAuditLog(filter);
         return ok({ success: true, count: entries.length, entries });
+      }
+
+      // ── Discovery tools ──────────────────────────────────────────────
+      case "match_card_products": {
+        const profile = MatchCardProductsInput.parse(args);
+        const matches = discoveryService.matchCardProducts(profile);
+        return ok({ success: true, count: matches.length, products: matches });
+      }
+
+      case "compare_card_products": {
+        const { productIds, ...profile } = CompareCardProductsInput.parse(args);
+        const hasProfile = Object.values(profile).some((v) => v !== undefined);
+        const comparison = discoveryService.compareProducts(
+          productIds,
+          hasProfile ? profile : undefined
+        );
+        return ok({ success: true, ...comparison });
+      }
+
+      case "estimate_annual_value": {
+        const { productId, includeSignupBonus, ...profile } = EstimateAnnualValueInput.parse(args);
+        const result = discoveryService.estimateAnnualValue(productId, profile, includeSignupBonus);
+        if (!result) return fail(`Unknown productId: ${productId}`);
+        return ok({ success: true, estimate: result });
+      }
+
+      case "get_signup_bonuses": {
+        const bonuses = discoveryService.getSignupBonuses();
+        return ok({ success: true, count: bonuses.length, bonuses });
+      }
+
+      case "check_product_eligibility": {
+        const { creditScore, annualIncome } = CheckProductEligibilityInput.parse(args);
+        const results = discoveryService.checkEligibility(creditScore, annualIncome);
+        return ok({ success: true, count: results.length, eligibility: results });
+      }
+
+      // ── Catalog management tools ──────────────────────────────────────
+      case "create_card_product": {
+        const input = CreateCardProductInput.parse(args);
+        const product = createCardProduct(input);
+        return ok({ success: true, product });
+      }
+
+      case "update_card_product": {
+        const { productId, ...updates } = UpdateCardProductInput.parse(args);
+        const product = updateCardProduct(productId, updates);
+        return ok({ success: true, product });
+      }
+
+      case "get_card_product": {
+        const { productId } = GetCardProductInput.parse(args);
+        const product = getCardProductById(productId);
+        if (!product) return fail(`Product ${productId} not found`);
+        return ok({ success: true, product });
+      }
+
+      case "delete_card_product": {
+        const { productId } = DeleteCardProductInput.parse(args);
+        const deleted = deleteCardProduct(productId);
+        if (!deleted) return fail(`Product ${productId} not found`);
+        return ok({ success: true, deleted: true, productId });
+      }
+
+      case "update_reward_rates": {
+        const { productId, rewardRates } = UpdateRewardRatesInput.parse(args);
+        const product = updateCardProduct(productId, { rewardRates });
+        return ok({ success: true, product });
+      }
+
+      case "update_signup_bonus": {
+        const { productId, signupBonus } = UpdateSignupBonusInput.parse(args);
+        const product = updateCardProduct(productId, { signupBonus });
+        return ok({ success: true, product });
+      }
+
+      case "update_eligibility": {
+        const { productId, eligibility } = UpdateEligibilityInput.parse(args);
+        const product = updateCardProduct(productId, { eligibility });
+        return ok({ success: true, product });
+      }
+
+      case "update_apr_ranges": {
+        const { productId, aprRanges } = UpdateAprRangesInput.parse(args);
+        const product = updateCardProduct(productId, { aprRanges });
+        return ok({ success: true, product });
+      }
+
+      case "update_fees": {
+        const { productId, fees } = UpdateFeesInput.parse(args);
+        const product = updateCardProduct(productId, { fees });
+        return ok({ success: true, product });
+      }
+
+      case "update_benefits": {
+        const { productId, benefits } = UpdateBenefitsInput.parse(args);
+        const product = updateCardProduct(productId, { benefits });
+        return ok({ success: true, product });
+      }
+
+      // ── Toolset tools ──────────────────────────────────────────────────
+      case "list_toolsets": {
+        const { tier } = ListToolsetsInput.parse(args);
+        const toolsets = tier ? toolsetRegistry.listForTier(tier) : toolsetRegistry.list();
+        return ok({ success: true, count: toolsets.length, toolsets });
+      }
+
+      case "get_toolset": {
+        const { toolsetId } = GetToolsetInput.parse(args);
+        const toolset = toolsetRegistry.get(toolsetId);
+        if (!toolset) return fail(`Toolset ${toolsetId} not found`);
+        return ok({ success: true, toolset });
       }
 
       default:

@@ -9,6 +9,7 @@ import {
 } from "../types";
 import { getRewardsHttpClient } from "./http-clients";
 import { v4Hex } from "./util";
+import { getCardProductById } from "../data/card-catalog";
 
 // ── Category multipliers for mock calculation ───────────────────────────────
 
@@ -101,25 +102,37 @@ export const rewardsAdapter = {
     cardId: string,
     amount: number,
     category: string,
-    cardTier: string
+    cardTier: string,
+    productId?: string
   ): Promise<RewardsCalculation> {
-    if (getEffectiveSimulationMode()) {
-      const baseRate = CATEGORY_RATES[category.toLowerCase()] ?? CATEGORY_RATES["default"];
+    const localCalc = (): RewardsCalculation => {
+      let baseRate: number;
+      if (productId) {
+        const product = getCardProductById(productId);
+        if (product?.rewardRates?.length) {
+          const cat = category.toLowerCase();
+          const match = product.rewardRates.find(
+            (r) => r.category.toLowerCase() === cat
+          );
+          const fallback = product.rewardRates.find(
+            (r) => r.category.toLowerCase() === "other" || r.category.toLowerCase() === "all"
+          );
+          baseRate = match?.multiplier ?? fallback?.multiplier ?? CATEGORY_RATES[cat] ?? CATEGORY_RATES["default"];
+        } else {
+          baseRate = CATEGORY_RATES[category.toLowerCase()] ?? CATEGORY_RATES["default"];
+        }
+      } else {
+        baseRate = CATEGORY_RATES[category.toLowerCase()] ?? CATEGORY_RATES["default"];
+      }
       const bonusRate = TIER_BONUS[cardTier.toLowerCase()] ?? 0;
       const totalRate = baseRate + bonusRate;
       const pointsEarned = Math.round(amount * totalRate * 100) / 100;
       const cashValueEarned = Math.round(pointsEarned * 0.01 * 100) / 100;
+      return { cardId, amount, category, baseRate, bonusRate, totalRate, pointsEarned, cashValueEarned };
+    };
 
-      return {
-        cardId,
-        amount,
-        category,
-        baseRate,
-        bonusRate,
-        totalRate,
-        pointsEarned,
-        cashValueEarned,
-      };
+    if (getEffectiveSimulationMode()) {
+      return localCalc();
     }
     try {
       const res = await withRetry(() =>
@@ -130,21 +143,7 @@ export const rewardsAdapter = {
       logger.error("Rewards calculate API failed, using local calc", {
         error: (err as AxiosError).message,
       });
-      const baseRate = CATEGORY_RATES[category.toLowerCase()] ?? CATEGORY_RATES["default"];
-      const bonusRate = TIER_BONUS[cardTier.toLowerCase()] ?? 0;
-      const totalRate = baseRate + bonusRate;
-      const pointsEarned = Math.round(amount * totalRate * 100) / 100;
-      const cashValueEarned = Math.round(pointsEarned * 0.01 * 100) / 100;
-      return {
-        cardId,
-        amount,
-        category,
-        baseRate,
-        bonusRate,
-        totalRate,
-        pointsEarned,
-        cashValueEarned,
-      };
+      return localCalc();
     }
   },
 

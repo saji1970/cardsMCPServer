@@ -26,6 +26,67 @@ export const CardFeatureSchema = z.object({
 
 export type CardFeature = z.infer<typeof CardFeatureSchema>;
 
+// ── Enriched product detail schemas ─────────────────────────────────────────
+
+export const RewardRateEntrySchema = z.object({
+  category: z.string(),
+  multiplier: z.number(),
+  description: z.string().optional(),
+});
+
+export type RewardRateEntry = z.infer<typeof RewardRateEntrySchema>;
+
+export const SignupBonusSchema = z.object({
+  bonusAmount: z.number(),
+  bonusType: z.string(),
+  minimumSpend: z.number(),
+  timeWindowDays: z.number(),
+  estimatedCashValue: z.number(),
+  description: z.string(),
+});
+
+export type SignupBonus = z.infer<typeof SignupBonusSchema>;
+
+export const EligibilityCriteriaSchema = z.object({
+  creditScoreMin: z.number(),
+  creditScoreRange: z.string(),
+  incomeRecommended: z.number().optional(),
+  existingRelationship: z.boolean().optional(),
+  additionalNotes: z.string().optional(),
+});
+
+export type EligibilityCriteria = z.infer<typeof EligibilityCriteriaSchema>;
+
+export const AprRangesSchema = z.object({
+  purchaseAprMin: z.number(),
+  purchaseAprMax: z.number(),
+  balanceTransferApr: z.number().optional(),
+  cashAdvanceApr: z.number().optional(),
+  penaltyApr: z.number().optional(),
+  introApr: z.number().optional(),
+});
+
+export type AprRanges = z.infer<typeof AprRangesSchema>;
+
+export const FeeScheduleSchema = z.object({
+  annualFeeUsd: z.number(),
+  foreignTransactionFeePercent: z.number(),
+  balanceTransferFeePercent: z.number().optional(),
+  cashAdvanceFeePercent: z.number().optional(),
+  latePaymentFeeUsd: z.number().optional(),
+});
+
+export type FeeSchedule = z.infer<typeof FeeScheduleSchema>;
+
+export const BenefitSummarySchema = z.object({
+  benefitId: z.string(),
+  name: z.string(),
+  estimatedAnnualValue: z.number().optional(),
+  description: z.string(),
+});
+
+export type BenefitSummary = z.infer<typeof BenefitSummarySchema>;
+
 export const CardProductSchema = z.object({
   productId: z.string(),
   displayName: z.string(),
@@ -37,6 +98,12 @@ export const CardProductSchema = z.object({
   features: z.array(CardFeatureSchema),
   /** Categories where this product is typically strongest vs peers. */
   strongCategories: z.array(z.string()),
+  rewardRates: z.array(RewardRateEntrySchema).optional(),
+  signupBonus: SignupBonusSchema.optional(),
+  eligibility: EligibilityCriteriaSchema.optional(),
+  aprRanges: AprRangesSchema.optional(),
+  fees: FeeScheduleSchema.optional(),
+  benefits: z.array(BenefitSummarySchema).optional(),
 });
 
 export type CardProduct = z.infer<typeof CardProductSchema>;

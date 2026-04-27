@@ -40,6 +40,26 @@ export const PermissionSchema = z.enum([
   "tool:publish_agent",
   "tool:install_agent",
   "tool:review_agent",
+  // Discovery tools
+  "tool:match_card_products",
+  "tool:compare_card_products",
+  "tool:estimate_annual_value",
+  "tool:get_signup_bonuses",
+  "tool:check_product_eligibility",
+  // Toolset tools
+  "tool:list_toolsets",
+  "tool:get_toolset",
+  // Catalog management tools
+  "tool:create_card_product",
+  "tool:update_card_product",
+  "tool:get_card_product",
+  "tool:delete_card_product",
+  "tool:update_reward_rates",
+  "tool:update_signup_bonus",
+  "tool:update_eligibility",
+  "tool:update_apr_ranges",
+  "tool:update_fees",
+  "tool:update_benefits",
   // OpenAPI tools
   "tool:list_openapi_loaded_operations",
   "tool:ext_*",

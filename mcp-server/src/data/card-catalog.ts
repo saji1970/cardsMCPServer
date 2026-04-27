@@ -1,7 +1,7 @@
 import type { Card, CardFeature, CardProduct } from "../types";
 
-/** Static catalog: card products, features, and category strengths for agent discovery. */
-export const CARD_PRODUCTS: CardProduct[] = [
+/** Seed data: card products loaded at startup. */
+const SEED_PRODUCTS: CardProduct[] = [
   {
     productId: "prod-chase-sapphire-reserve",
     displayName: "Chase Sapphire Reserve",
@@ -42,6 +42,44 @@ export const CARD_PRODUCTS: CardProduct[] = [
         purchaseRelevanceTags: ["travel"],
       },
     ],
+    rewardRates: [
+      { category: "dining", multiplier: 3, description: "3x points on dining worldwide" },
+      { category: "travel", multiplier: 3, description: "3x points on travel" },
+      { category: "other", multiplier: 1, description: "1x points on all other purchases" },
+    ],
+    signupBonus: {
+      bonusAmount: 60000,
+      bonusType: "Ultimate Rewards points",
+      minimumSpend: 4000,
+      timeWindowDays: 90,
+      estimatedCashValue: 900,
+      description: "Earn 60,000 bonus points after spending $4,000 in the first 3 months",
+    },
+    eligibility: {
+      creditScoreMin: 720,
+      creditScoreRange: "excellent",
+      incomeRecommended: 50000,
+      additionalNotes: "Not available if you received a Sapphire bonus in the last 48 months",
+    },
+    aprRanges: {
+      purchaseAprMin: 22.49,
+      purchaseAprMax: 29.49,
+      cashAdvanceApr: 29.49,
+      penaltyApr: 29.99,
+    },
+    fees: {
+      annualFeeUsd: 550,
+      foreignTransactionFeePercent: 0,
+      balanceTransferFeePercent: 5,
+      cashAdvanceFeePercent: 5,
+      latePaymentFeeUsd: 40,
+    },
+    benefits: [
+      { benefitId: "csr-travel-credit", name: "$300 Annual Travel Credit", estimatedAnnualValue: 300, description: "Automatic $300 statement credit for travel purchases annually" },
+      { benefitId: "csr-lounge", name: "Priority Pass Lounge Access", estimatedAnnualValue: 100, description: "Complimentary Priority Pass Select membership for airport lounge access" },
+      { benefitId: "csr-doordash", name: "DoorDash DashPass", estimatedAnnualValue: 60, description: "Complimentary DashPass subscription and annual DoorDash credits" },
+      { benefitId: "csr-lyft", name: "Lyft Pink", estimatedAnnualValue: 50, description: "Complimentary Lyft Pink membership with ride discounts" },
+    ],
   },
   {
     productId: "prod-amex-gold",
@@ -76,6 +114,39 @@ export const CARD_PRODUCTS: CardProduct[] = [
         purchaseRelevanceTags: ["shopping", "general"],
       },
     ],
+    rewardRates: [
+      { category: "dining", multiplier: 4, description: "4x points at restaurants worldwide" },
+      { category: "groceries", multiplier: 4, description: "4x points at U.S. supermarkets (up to $25K/yr)" },
+      { category: "other", multiplier: 1, description: "1x points on all other purchases" },
+    ],
+    signupBonus: {
+      bonusAmount: 60000,
+      bonusType: "Membership Rewards points",
+      minimumSpend: 6000,
+      timeWindowDays: 180,
+      estimatedCashValue: 600,
+      description: "Earn 60,000 bonus points after spending $6,000 in the first 6 months",
+    },
+    eligibility: {
+      creditScoreMin: 700,
+      creditScoreRange: "good_to_excellent",
+      additionalNotes: "Subject to Amex welcome bonus eligibility rules (once per lifetime per product)",
+    },
+    aprRanges: {
+      purchaseAprMin: 21.49,
+      purchaseAprMax: 29.49,
+      penaltyApr: 29.99,
+    },
+    fees: {
+      annualFeeUsd: 325,
+      foreignTransactionFeePercent: 0,
+      latePaymentFeeUsd: 40,
+    },
+    benefits: [
+      { benefitId: "amex-gold-dining-credit", name: "$120 Dining Credit", estimatedAnnualValue: 120, description: "$10/month credit at select dining partners (Grubhub, Seamless, etc.)" },
+      { benefitId: "amex-gold-uber-credit", name: "$120 Uber Cash", estimatedAnnualValue: 120, description: "$10/month in Uber Cash for Uber Eats or rides" },
+      { benefitId: "amex-gold-dunkin-credit", name: "$84 Dunkin Credit", estimatedAnnualValue: 84, description: "$7/month Dunkin statement credit" },
+    ],
   },
   {
     productId: "prod-citi-double-cash",
@@ -103,6 +174,29 @@ export const CARD_PRODUCTS: CardProduct[] = [
         purchaseRelevanceTags: ["electronics", "shopping", "general"],
       },
     ],
+    rewardRates: [
+      { category: "all", multiplier: 2, description: "2% cash back on all purchases (1% at purchase + 1% when paid)" },
+    ],
+    eligibility: {
+      creditScoreMin: 670,
+      creditScoreRange: "good",
+      additionalNotes: "No previous Citi Double Cash bonus in the last 24 months",
+    },
+    aprRanges: {
+      purchaseAprMin: 19.49,
+      purchaseAprMax: 29.49,
+      balanceTransferApr: 29.49,
+      cashAdvanceApr: 29.99,
+      penaltyApr: 29.99,
+    },
+    fees: {
+      annualFeeUsd: 0,
+      foreignTransactionFeePercent: 3,
+      balanceTransferFeePercent: 3,
+      cashAdvanceFeePercent: 5,
+      latePaymentFeeUsd: 40,
+    },
+    benefits: [],
   },
   {
     productId: "prod-capital-venture-x",
@@ -137,17 +231,84 @@ export const CARD_PRODUCTS: CardProduct[] = [
         purchaseRelevanceTags: ["electronics", "general"],
       },
     ],
+    rewardRates: [
+      { category: "travel", multiplier: 5, description: "5x miles on flights booked through Capital One Travel" },
+      { category: "hotels", multiplier: 10, description: "10x miles on hotels booked through Capital One Travel" },
+      { category: "other", multiplier: 2, description: "2x miles on all other purchases" },
+    ],
+    signupBonus: {
+      bonusAmount: 75000,
+      bonusType: "Venture miles",
+      minimumSpend: 4000,
+      timeWindowDays: 90,
+      estimatedCashValue: 750,
+      description: "Earn 75,000 bonus miles after spending $4,000 in the first 3 months",
+    },
+    eligibility: {
+      creditScoreMin: 740,
+      creditScoreRange: "excellent",
+      incomeRecommended: 60000,
+    },
+    aprRanges: {
+      purchaseAprMin: 21.49,
+      purchaseAprMax: 28.49,
+      cashAdvanceApr: 29.99,
+      penaltyApr: 29.99,
+    },
+    fees: {
+      annualFeeUsd: 395,
+      foreignTransactionFeePercent: 0,
+      cashAdvanceFeePercent: 5,
+      latePaymentFeeUsd: 40,
+    },
+    benefits: [
+      { benefitId: "vx-travel-credit", name: "$300 Annual Travel Credit", estimatedAnnualValue: 300, description: "Annual $300 credit for bookings through Capital One Travel" },
+      { benefitId: "vx-lounge", name: "Capital One Lounge Access", estimatedAnnualValue: 100, description: "Access to Capital One Lounges and Priority Pass Select" },
+      { benefitId: "vx-anniversary-bonus", name: "10,000 Anniversary Miles", estimatedAnnualValue: 100, description: "10,000 bonus miles every account anniversary" },
+    ],
   },
 ];
 
+// ── Mutable in-memory store ───────────────────────────────────────────────────
+
+const catalog = new Map<string, CardProduct>();
+
+for (const p of SEED_PRODUCTS) {
+  catalog.set(p.productId, p);
+}
+
+/** Kept for backward compat — any code referencing CARD_PRODUCTS gets the live array. */
+export const CARD_PRODUCTS = SEED_PRODUCTS;
+
 export function getCardProductById(productId: string): CardProduct | undefined {
-  return CARD_PRODUCTS.find((p) => p.productId === productId);
+  return catalog.get(productId);
 }
 
 export function listCardProducts(filter?: { issuer?: string }): CardProduct[] {
-  if (!filter?.issuer?.trim()) return [...CARD_PRODUCTS];
+  const all = [...catalog.values()];
+  if (!filter?.issuer?.trim()) return all;
   const q = filter.issuer.toLowerCase();
-  return CARD_PRODUCTS.filter((p) => p.issuer.toLowerCase().includes(q));
+  return all.filter((p) => p.issuer.toLowerCase().includes(q));
+}
+
+export function createCardProduct(product: CardProduct): CardProduct {
+  if (catalog.has(product.productId)) {
+    throw new Error(`Product ${product.productId} already exists`);
+  }
+  catalog.set(product.productId, product);
+  return product;
+}
+
+export function updateCardProduct(productId: string, updates: Partial<CardProduct>): CardProduct {
+  const existing = catalog.get(productId);
+  if (!existing) throw new Error(`Product ${productId} not found`);
+  const updated = { ...existing, ...updates, productId }; // productId is immutable
+  catalog.set(productId, updated);
+  return updated;
+}
+
+export function deleteCardProduct(productId: string): boolean {
+  return catalog.delete(productId);
 }
 
 /** Merge catalog copy onto a card instance for MCP responses. */

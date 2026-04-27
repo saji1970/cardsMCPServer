@@ -24,10 +24,11 @@ export const rewardsService = {
     cardId: string,
     amount: number,
     category: string,
-    cardTier: string
+    cardTier: string,
+    productId?: string
   ): Promise<RewardsCalculation> {
-    logger.info("Calculating rewards", { cardId, amount, category });
-    return rewardsAdapter.calculateRewards(cardId, amount, category, cardTier);
+    logger.info("Calculating rewards", { cardId, amount, category, productId });
+    return rewardsAdapter.calculateRewards(cardId, amount, category, cardTier, productId);
   },
 
   async redeemRewards(request: RedemptionRequest): Promise<RedemptionResponse> {

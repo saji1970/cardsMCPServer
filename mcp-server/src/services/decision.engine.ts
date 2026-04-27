@@ -90,7 +90,8 @@ export const decisionEngine = {
         card.cardId,
         input.amount,
         input.category,
-        card.tier
+        card.tier,
+        card.productId
       );
       const applicablePromotions = getPromosForCard(allPromos, card);
       const rewardValue = rewards.cashValueEarned;
@@ -168,7 +169,7 @@ export const decisionEngine = {
         merchantName: input.merchant,
         category: input.category,
       }),
-      rewardsService.calculateRewards(targetCardId, input.amount, input.category, card.tier),
+      rewardsService.calculateRewards(targetCardId, input.amount, input.category, card.tier, card.productId),
     ]);
 
     const promos = await promoService.getApplicableOffers(

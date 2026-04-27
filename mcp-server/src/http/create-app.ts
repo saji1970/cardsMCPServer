@@ -27,11 +27,32 @@ import { getDynamicToolBundle } from "../tools/dynamic-tools-state";
 import { entitlementService } from "../services/entitlement.service";
 import { userStore } from "../data/user-store";
 import { marketplaceService, AgentCategory } from "../services/marketplace.service";
-import { listCardProducts } from "../data/card-catalog";
+import {
+  listCardProducts,
+  getCardProductById,
+  createCardProduct,
+  updateCardProduct,
+  deleteCardProduct,
+} from "../data/card-catalog";
+import {
+  CardProductSchema,
+  RewardRateEntrySchema,
+  SignupBonusSchema,
+  EligibilityCriteriaSchema,
+  AprRangesSchema,
+  FeeScheduleSchema,
+  BenefitSummarySchema,
+} from "../types";
+import { z } from "zod";
+import { apiKeyStore } from "../data/api-key-store";
+import { toolsetRegistry } from "../data/toolset-registry";
+import { requireApiKeyOrAdmin } from "./api-key-middleware";
+import { SubscriptionTierSchema } from "../types/toolset";
 import { cardService } from "../services/card.service";
 import { promoService } from "../services/promo.service";
 import { logger } from "../utils/logger";
 import { mountStreamableMcpHttp } from "./mcp-streamable-http";
+import { buildJobStore } from "../jobs/build-job-store";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads", "openapi");
 
@@ -69,6 +90,90 @@ const upload = multer({
   limits: { fileSize: 8 * 1024 * 1024 },
 });
 
+function buildMcpConfigPayload(req: Request): Record<string, unknown> {
+  const host = req.headers.host || "localhost:3001";
+  const protocol = req.protocol || "http";
+  const baseUrl = `${protocol}://${host}`;
+  const toolsets = toolsetRegistry.list();
+  const allTools = staticToolDefinitions.map((t) => ({ name: t.name, description: t.description }));
+  const dyn = getDynamicToolBundle();
+  if (dyn) {
+    for (const t of dyn.tools) {
+      allTools.push({ name: t.name, description: t.description });
+    }
+  }
+  const cursorMcp = {
+    mcpServers: {
+      "cards-mcp": {
+        url: `${baseUrl}/mcp`,
+        headers: {
+          "X-API-Key": "<your-api-key>",
+          "X-Toolset-Id": "1",
+        },
+      },
+    },
+  };
+  return {
+    serverUrl: `${baseUrl}/mcp`,
+    authMethod: "X-API-Key header or Bearer token (cmcp_sk_*)",
+    optionalHeaders: {
+      "X-Toolset-Id":
+        "Optional. Restrict MCP tools to one toolset id: 1, 2, card-discovery, or card-catalog-management. Omit to expose every tool your subscription tier allows.",
+    },
+    registrationEndpoint: `${baseUrl}/api/keys/register`,
+    toolsetsEndpoint: `${baseUrl}/api/toolsets`,
+    bankCatalog: {
+      list: `${baseUrl}/api/bank/v1/catalog`,
+      product: `${baseUrl}/api/bank/v1/products/:productId`,
+      createProduct: `POST ${baseUrl}/api/bank/v1/products (subscription API key or admin)`,
+    },
+    buildJobs: {
+      storageDir: buildJobStore.jobsDir(),
+      list: `GET ${baseUrl}/api/jobs`,
+      create: `POST ${baseUrl}/api/jobs`,
+      get: `GET ${baseUrl}/api/jobs/:id`,
+      tick: `POST ${baseUrl}/api/jobs/:id/tick — advances one step; state is saved to disk and resumes after restart`,
+    },
+    toolsets: toolsets.map((ts) => ({
+      toolsetId: ts.toolsetId,
+      name: ts.name,
+      description: ts.description,
+      tools: ts.tools,
+      requiredTier: ts.requiredTier,
+    })),
+    toolCount: allTools.length,
+    tools: allTools,
+    copyPaste: {
+      description: "Copy the JSON below into Cursor or Claude Desktop MCP settings (compare to RapidAPI copy-paste).",
+      cursorMcp,
+      claudeMcp: { mcpServers: cursorMcp.mcpServers },
+    },
+    examples: {
+      claudeDesktop: {
+        mcpServers: {
+          "cards-mcp": {
+            url: `${baseUrl}/mcp`,
+            headers: { "X-API-Key": "<your-api-key>" },
+          },
+        },
+      },
+      cursor: {
+        mcpServers: {
+          "cards-mcp": {
+            url: `${baseUrl}/mcp`,
+            headers: { "X-API-Key": "<your-api-key>" },
+          },
+        },
+      },
+      customAgent: {
+        note: "POST to /mcp with JSON-RPC initialize, include X-API-Key header",
+        registerFirst: `curl -X POST ${baseUrl}/api/keys/register -H 'Content-Type: application/json' -d '{"agentName":"my-agent","contactEmail":"dev@example.com"}'`,
+        connectMcp: `curl -X POST ${baseUrl}/mcp -H 'Content-Type: application/json' -H 'X-API-Key: <key>' -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"my-agent","version":"1.0.0"}},"id":1}'`,
+      },
+    },
+  };
+}
+
 export function createHttpApp(): express.Express {
   const app = express();
   app.disable("x-powered-by");
@@ -85,6 +190,8 @@ export function createHttpApp(): express.Express {
         "MCP-Protocol-Version",
         "Accept",
         "X-User-Id",
+        "X-API-Key",
+        "X-Toolset-Id",
       ],
       exposedHeaders: ["mcp-session-id", "Mcp-Session-Id"],
     })
@@ -264,6 +371,342 @@ export function createHttpApp(): express.Express {
   app.get("/api/catalog/products", (_req, res) => {
     const products = listCardProducts();
     res.json({ success: true, count: products.length, products });
+  });
+
+  app.get("/api/catalog/products/:productId", (req, res) => {
+    const product = getCardProductById(req.params.productId as string);
+    if (!product) { res.status(404).json({ success: false, error: "Product not found" }); return; }
+    res.json({ success: true, product });
+  });
+
+  app.post("/api/catalog/products", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const product = CardProductSchema.parse(req.body);
+      const created = createCardProduct(product);
+      res.status(201).json({ success: true, product: created });
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: "Validation error", details: e.issues });
+        return;
+      }
+      res.status(409).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/catalog/products/:productId", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const product = updateCardProduct(req.params.productId as string, req.body as Record<string, unknown>);
+      res.json({ success: true, product });
+    } catch (e) {
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.delete("/api/catalog/products/:productId", requireApiKeyOrAdmin, (req, res) => {
+    const deleted = deleteCardProduct(req.params.productId as string);
+    if (!deleted) { res.status(404).json({ success: false, error: "Product not found" }); return; }
+    res.json({ success: true, deleted: true, productId: req.params.productId as string });
+  });
+
+  app.put("/api/catalog/products/:productId/reward-rates", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const rewardRates = z.array(RewardRateEntrySchema).parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { rewardRates });
+      res.json({ success: true, product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/catalog/products/:productId/signup-bonus", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const signupBonus = SignupBonusSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { signupBonus });
+      res.json({ success: true, product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/catalog/products/:productId/eligibility", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const eligibility = EligibilityCriteriaSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { eligibility });
+      res.json({ success: true, product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/catalog/products/:productId/apr-ranges", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const aprRanges = AprRangesSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { aprRanges });
+      res.json({ success: true, product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/catalog/products/:productId/fees", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const fees = FeeScheduleSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { fees });
+      res.json({ success: true, product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/catalog/products/:productId/benefits", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const benefits = z.array(BenefitSummarySchema).parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { benefits });
+      res.json({ success: true, product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  // ── Bank catalog API (issuer / partner integration) ───────────────────────
+  // Same product model as /api/catalog: reward rate tables, signup bonus, eligibility, APR, fees, benefits.
+
+  app.get("/api/bank/v1/catalog", (req, res) => {
+    const issuer = typeof req.query.issuer === "string" ? req.query.issuer : undefined;
+    const products = listCardProducts(issuer ? { issuer } : undefined);
+    res.json({ success: true, api: "bank.v1", count: products.length, products });
+  });
+
+  app.get("/api/bank/v1/products/:productId", (req, res) => {
+    const product = getCardProductById(req.params.productId as string);
+    if (!product) { res.status(404).json({ success: false, error: "Product not found" }); return; }
+    res.json({ success: true, api: "bank.v1", product });
+  });
+
+  app.post("/api/bank/v1/products", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const product = CardProductSchema.parse(req.body);
+      const created = createCardProduct(product);
+      res.status(201).json({ success: true, api: "bank.v1", product: created });
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: "Validation error", details: e.issues });
+        return;
+      }
+      res.status(409).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/bank/v1/products/:productId", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const product = updateCardProduct(req.params.productId as string, req.body as Record<string, unknown>);
+      res.json({ success: true, api: "bank.v1", product });
+    } catch (e) {
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.delete("/api/bank/v1/products/:productId", requireApiKeyOrAdmin, (req, res) => {
+    const deleted = deleteCardProduct(req.params.productId as string);
+    if (!deleted) { res.status(404).json({ success: false, error: "Product not found" }); return; }
+    res.json({ success: true, api: "bank.v1", deleted: true, productId: req.params.productId as string });
+  });
+
+  app.put("/api/bank/v1/products/:productId/reward-rates", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const rewardRates = z.array(RewardRateEntrySchema).parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { rewardRates });
+      res.json({ success: true, api: "bank.v1", product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/bank/v1/products/:productId/signup-bonus", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const signupBonus = SignupBonusSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { signupBonus });
+      res.json({ success: true, api: "bank.v1", product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/bank/v1/products/:productId/eligibility", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const eligibility = EligibilityCriteriaSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { eligibility });
+      res.json({ success: true, api: "bank.v1", product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/bank/v1/products/:productId/apr-ranges", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const aprRanges = AprRangesSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { aprRanges });
+      res.json({ success: true, api: "bank.v1", product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/bank/v1/products/:productId/fees", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const fees = FeeScheduleSchema.parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { fees });
+      res.json({ success: true, api: "bank.v1", product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/bank/v1/products/:productId/benefits", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const benefits = z.array(BenefitSummarySchema).parse(req.body);
+      const product = updateCardProduct(req.params.productId as string, { benefits });
+      res.json({ success: true, api: "bank.v1", product });
+    } catch (e) {
+      if (e instanceof z.ZodError) { res.status(400).json({ success: false, error: "Validation error", details: e.issues }); return; }
+      res.status(404).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  // ── API Key subscription endpoints ──────────────────────────────────────
+
+  app.post("/api/keys/register", (req, res) => {
+    const { agentName, contactEmail, description } = req.body as {
+      agentName?: string; contactEmail?: string; description?: string;
+    };
+    if (!agentName || !contactEmail) {
+      res.status(400).json({ success: false, error: "agentName and contactEmail are required" });
+      return;
+    }
+    const key = apiKeyStore.create({ agentName, contactEmail, description });
+    res.status(201).json({
+      success: true,
+      apiKey: key.keyId,
+      tier: key.tier,
+      message: "Store this API key securely. It cannot be retrieved again.",
+    });
+  });
+
+  app.get("/api/admin/keys", requireAdmin, (_req, res) => {
+    const keys = apiKeyStore.list();
+    res.json({ success: true, count: keys.length, keys });
+  });
+
+  app.post("/api/admin/keys/:keyId/revoke", requireAdmin, (req, res) => {
+    const key = apiKeyStore.revoke(req.params.keyId as string);
+    if (!key) { res.status(404).json({ success: false, error: "API key not found" }); return; }
+    res.json({ success: true, key });
+  });
+
+  app.put("/api/admin/keys/:keyId/tier", requireAdmin, (req, res) => {
+    const { tier } = req.body as { tier?: string };
+    if (!tier) { res.status(400).json({ success: false, error: "tier is required" }); return; }
+    try {
+      const parsedTier = SubscriptionTierSchema.parse(tier);
+      const key = apiKeyStore.updateTier(req.params.keyId as string, parsedTier);
+      if (!key) { res.status(404).json({ success: false, error: "API key not found" }); return; }
+      res.json({ success: true, key });
+    } catch {
+      res.status(400).json({ success: false, error: "Invalid tier. Use: free, basic, or pro" });
+    }
+  });
+
+  app.delete("/api/admin/keys/:keyId", requireAdmin, (req, res) => {
+    const deleted = apiKeyStore.delete(req.params.keyId as string);
+    if (!deleted) { res.status(404).json({ success: false, error: "API key not found" }); return; }
+    res.json({ success: true, deleted: true });
+  });
+
+  // ── /mcp-config export endpoint ─────────────────────────────────────────
+
+  app.get("/mcp-config", (req, res) => {
+    res.json(buildMcpConfigPayload(req));
+  });
+
+  app.get("/api/mcp-config", (req, res) => {
+    res.json(buildMcpConfigPayload(req));
+  });
+
+  app.get("/api/toolsets", (req, res) => {
+    const tierQ = req.query.tier;
+    if (typeof tierQ === "string" && tierQ.trim()) {
+      try {
+        const tier = SubscriptionTierSchema.parse(tierQ);
+        res.json({ success: true, toolsets: toolsetRegistry.listForTier(tier) });
+        return;
+      } catch {
+        res.status(400).json({ success: false, error: "Invalid tier. Use: free, basic, or pro" });
+        return;
+      }
+    }
+    res.json({ success: true, toolsets: toolsetRegistry.list() });
+  });
+
+  // ── Durable build / checkpoint jobs (rate limits: tick one step, persist, resume after restart) ──
+
+  app.get("/api/jobs", requireApiKeyOrAdmin, (_req, res) => {
+    res.json({ success: true, jobs: buildJobStore.list() });
+  });
+
+  app.post("/api/jobs", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const { name, kind, totalSteps, checkpoint } = req.body as {
+        name?: string; kind?: string; totalSteps?: number; checkpoint?: Record<string, unknown>;
+      };
+      if (!name?.trim() || !kind?.trim()) {
+        res.status(400).json({ success: false, error: "name and kind are required" });
+        return;
+      }
+      const job = buildJobStore.create({ name, kind, totalSteps: totalSteps ?? 1, checkpoint });
+      res.status(201).json({ success: true, job });
+    } catch (e) {
+      res.status(500).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.get("/api/jobs/:id", requireApiKeyOrAdmin, (req, res) => {
+    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const job = buildJobStore.get(id);
+    if (!job) { res.status(404).json({ success: false, error: "Job not found" }); return; }
+    res.json({ success: true, job });
+  });
+
+  app.post("/api/jobs/:id/tick", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+      const merge = (req.body as { mergeCheckpoint?: Record<string, unknown> })?.mergeCheckpoint;
+      const job = buildJobStore.tick(id, { mergeCheckpoint: merge });
+      res.json({ success: true, job });
+    } catch (e) {
+      res.status(400).json({ success: false, error: (e as Error).message });
+    }
+  });
+
+  app.post("/api/jobs/:id/reset", requireApiKeyOrAdmin, (req, res) => {
+    try {
+      const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+      const { totalSteps, clearCheckpoint } = req.body as { totalSteps?: number; clearCheckpoint?: boolean };
+      const job = buildJobStore.reset(id, { totalSteps, clearCheckpoint });
+      res.json({ success: true, job });
+    } catch (e) {
+      res.status(400).json({ success: false, error: (e as Error).message });
+    }
   });
 
   app.get("/api/cards/wallet", async (req, res) => {
