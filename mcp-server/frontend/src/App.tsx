@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { MarketingPage } from "./MarketingPage";
 
 type Tab = "marketplace" | "cards" | "admin" | "openapi" | "sandbox" | "users" | "audit" | "agentdev";
 type MpView = "browse" | "detail" | "publisher" | "installed";
@@ -134,6 +135,13 @@ function loadAuthUser(): AuthUser | null {
   }
 }
 
+function dashboardForUser(u: AuthUser): { tab: Tab; mpView: MpView } {
+  const r = u.roles;
+  if (r.includes("admin")) return { tab: "admin", mpView: "browse" };
+  if (r.includes("publisher")) return { tab: "marketplace", mpView: "publisher" };
+  return { tab: "marketplace", mpView: "browse" };
+}
+
 export function App(): React.ReactElement {
   // ── Auth state ──────────────────────────────────────────────────────────
   const [authUser, setAuthUser] = useState<AuthUser | null>(loadAuthUser);
@@ -145,6 +153,7 @@ export function App(): React.ReactElement {
   const [regName, setRegName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regRole, setRegRole] = useState<"consumer" | "publisher">("consumer");
+  const [unauthView, setUnauthView] = useState<"home" | "auth">("home");
 
   const isAdmin = authUser?.roles.includes("admin") ?? false;
   const userId = authUser?.userId ?? "demo-user";
@@ -205,6 +214,7 @@ export function App(): React.ReactElement {
     setRegName("");
     setRegEmail("");
     setAuthMode("login");
+    setUnauthView("home");
   };
 
   const switchAuthMode = () => {
@@ -212,8 +222,23 @@ export function App(): React.ReactElement {
     setAuthMode(authMode === "login" ? "register" : "login");
   };
 
-  // ── If not logged in, show login/register screen ────────────────────────
+  // ── Public marketing homepage or login/register ───────────────────────
   if (!authUser) {
+    if (unauthView === "home") {
+      return (
+        <MarketingPage
+          onSignIn={() => {
+            setUnauthView("auth");
+            setAuthMode("login");
+          }}
+          onRegister={() => {
+            setUnauthView("auth");
+            setAuthMode("register");
+          }}
+        />
+      );
+    }
+
     const isRegister = authMode === "register";
     const canSubmit = isRegister
       ? !!(loginId && loginPw && regName && regEmail)
@@ -223,6 +248,9 @@ export function App(): React.ReactElement {
     return (
       <div className="login-backdrop">
         <div className="login-card">
+          <button type="button" className="login-back-home" onClick={() => { setUnauthView("home"); setLoginErr(null); }}>
+            ← Back to home
+          </button>
           <h1>Cards MCP</h1>
           <p className="sub">{isRegister ? "Create a new account" : "Sign in to continue"}</p>
           <label>User ID</label>
@@ -274,7 +302,7 @@ export function App(): React.ReactElement {
             {loginLoading ? (isRegister ? "Creating account..." : "Signing in...") : (isRegister ? "Create account" : "Sign in")}
           </button>
           <p className="auth-toggle">
-            {isRegister ? "Already have an account? " : "Don't have an account? "}
+            {isRegister ? "Already have an account? " : "Don&apos;t have an account? "}
             <button type="button" className="auth-toggle-link" onClick={switchAuthMode}>
               {isRegister ? "Sign in" : "Register"}
             </button>
@@ -289,19 +317,28 @@ export function App(): React.ReactElement {
     );
   }
 
-  // ── Logged-in app ─────────────────────────────────────────────────────
-  return <LoggedInApp authUser={authUser} userId={userId} isAdmin={isAdmin} onLogout={doLogout} />;
+  const dash = dashboardForUser(authUser);
+  return (
+    <LoggedInApp
+      authUser={authUser}
+      userId={userId}
+      isAdmin={isAdmin}
+      onLogout={doLogout}
+      initialTab={dash.tab}
+      initialMpView={dash.mpView}
+    />
+  );
 }
 
-// ── Main app (after login) ─────────────────────────────────────────────────
-
-function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
+function LoggedInApp({ authUser, userId, isAdmin, onLogout, initialTab, initialMpView }: {
   authUser: AuthUser;
   userId: string;
   isAdmin: boolean;
   onLogout: () => void;
+  initialTab: Tab;
+  initialMpView: MpView;
 }): React.ReactElement {
-  const [tab, setTab] = useState<Tab>("marketplace");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem(ADMIN_KEY) ?? "");
   const [wallet, setWallet] = useState<CardRow[]>([]);
   const [catalog, setCatalog] = useState<Product[]>([]);
@@ -343,7 +380,7 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
   const [sandboxOut, setSandboxOut] = useState<string>("");
 
   // ── Marketplace state ───────────────────────────────────────────────────
-  const [mpView, setMpView] = useState<MpView>("browse");
+  const [mpView, setMpView] = useState<MpView>(initialMpView);
   const [mpAgents, setMpAgents] = useState<MpAgent[]>([]);
   const [mpFeatured, setMpFeatured] = useState<MpAgent[]>([]);
   const [mpSearch, setMpSearch] = useState("");
@@ -1219,9 +1256,13 @@ function LoggedInApp({ authUser, userId, isAdmin, onLogout }: {
       <header>
         <div className="header-row">
           <div>
-            <h1>Cards MCP — Control plane</h1>
+            <h1>{isAdmin ? "Cards MCP — Control plane" : "Cards MCP — Dashboard"}</h1>
             <p className="sub">
-              Agent marketplace, catalog, wallet, bank API endpoints, OpenAPI tools, and sandbox.
+              {isAdmin
+                ? "Full control plane: banks, OpenAPI, users, and agent marketplace."
+                : authUser.roles.includes("publisher")
+                  ? "Publisher workspace: list agents, track revenue, and use the marketplace."
+                  : "Your dashboard: agent marketplace, installs, and reviews."}
             </p>
           </div>
           <div className="user-badge">

@@ -698,6 +698,162 @@ pre.out {
   max-width: 100%;
   margin-top: 0.2rem;
 }
+.login-back-home {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.35rem;
+  background: transparent;
+  border: none;
+  color: #7cb7ff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: left;
+}
+.login-back-home:hover {
+  text-decoration: underline;
+}
+
+/* ── Marketing homepage ────────────────────────────────────────────────────── */
+
+.marketing {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #0c0e14 0%, #0f1117 40%, #12151c 100%);
+  color: #e8eaef;
+}
+.marketing-nav {
+  border-bottom: 1px solid #2a3142;
+  background: rgba(15, 17, 23, 0.85);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.marketing-nav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0.85rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.marketing-logo {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+.marketing-nav-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.marketing-hero {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 2.5rem;
+}
+.marketing-hero-inner {
+  max-width: 720px;
+}
+.marketing-eyebrow {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #6b8cc4;
+  margin: 0 0 0.75rem;
+}
+.marketing-title {
+  font-size: clamp(1.75rem, 4vw, 2.35rem);
+  line-height: 1.2;
+  font-weight: 700;
+  margin: 0 0 1rem;
+  color: #f0f2f7;
+}
+.marketing-lead {
+  font-size: 1.05rem;
+  color: #9aa3b5;
+  line-height: 1.6;
+  margin: 0 0 1.75rem;
+}
+.marketing-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+.marketing-cta-primary {
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
+}
+.marketing-cta-secondary {
+  padding: 0.6rem 1.1rem;
+}
+.marketing-section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  border-top: 1px solid #2a3142;
+}
+.marketing-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+}
+.marketing-section-lead {
+  color: #9aa3b5;
+  font-size: 0.95rem;
+  max-width: 720px;
+  margin: 0 0 1.5rem;
+  line-height: 1.55;
+}
+.marketing-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.marketing-card {
+  background: #161b26;
+  border: 1px solid #2a3142;
+  border-radius: 12px;
+  padding: 1.1rem 1.15rem;
+}
+.marketing-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: #e8eaef;
+}
+.marketing-card p {
+  margin: 0;
+  font-size: 0.86rem;
+  color: #9aa3b5;
+  line-height: 1.5;
+}
+.marketing-footer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 2.5rem;
+  border-top: 1px solid #2a3142;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #6a7388;
+  font-size: 0.86rem;
+}
+.marketing-footer-link {
+  background: none;
+  border: none;
+  color: #7cb7ff;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: underline;
+  padding: 0;
+}
 
 /* ── Header user badge ─────────────────────────────────────────────────────── */
 
